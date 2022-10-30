@@ -68,7 +68,7 @@ class Parser(torch.nn.Module):
         n_charge = torch.sum(tore[species],dim=1).reshape(-1).type(torch.int64)
         if 'charges' in kwargs and torch.is_tensor(kwargs['charges']):
             n_charge += kwargs['charges'].reshape(-1).type(torch.int64)
-        nocc = n_charge//2
+        nocc = torch.div(n_charge,2, rounding_mode='floor')
 
         if ((n_charge%2)==1).any():
             raise ValueError("Only closed shell system (with even number of electrons) are supported")
@@ -356,32 +356,31 @@ class Force(torch.nn.Module):
         self.seqm_parameters = seqm_parameters
 
 
-    def forward(self, const, coordinates, species, learned_parameters=dict(), P0=None, step=0, *args, **kwargs):
+    def forward(self, const, coordinates, species, learned_parameters=dict(), P0=None, step=0, mode=None, *args, **kwargs):
 
-        coordinates.requires_grad_(True)
         Hf, Etot, Eelec, Enuc, Eiso, EnucAB, e, P, charge, notconverged = \
             self.energy(const, coordinates, species, \
                 learned_parameters=learned_parameters, all_terms=True, P0=P0, step=step, *args, **kwargs)
-        #L = Etot.sum()
         L = Hf.sum()
-        if const.do_timing:
-            t0 = time.time()
-
-        #gv = [coordinates]
-        #gradients  = grad(L, gv,create_graph=self.create_graph)
-        L.backward(create_graph=self.create_graph)
-        if const.do_timing:
-            if torch.cuda.is_available():
-                torch.cuda.synchronize()
-            t1 = time.time()
-            const.timing["Force"].append(t1-t0)
-        #force = -gradients[0]
-        if self.create_graph:
-            force = -coordinates.grad.clone()
-            with torch.no_grad():
-                coordinates.grad.zero_()
+        if mode=='new' and self.create_graph:
+            gv = [coordinates]
+            gradients  = grad(L, gv,create_graph=self.create_graph)
+            force = -gradients[0]
         else:
-            force = -coordinates.grad.detach()
-            coordinates.grad.zero_()
+            coordinates.requires_grad_(True)
+            if const.do_timing: t0 = time.time()
+            L.backward(create_graph=self.create_graph)
+            if const.do_timing:
+                if torch.cuda.is_available():
+                    torch.cuda.synchronize()
+                t1 = time.time()
+                const.timing["Force"].append(t1-t0)
+            if self.create_graph:
+                force = -coordinates.grad.clone()
+                with torch.no_grad():
+                    coordinates.grad.zero_()
+            else:
+                force = -coordinates.grad.detach()
+                coordinates.grad.zero_()
 
         return force, P, Etot, Hf, Eelec, Enuc, Eiso, EnucAB, e, charge, notconverged

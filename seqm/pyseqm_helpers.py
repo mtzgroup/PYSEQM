@@ -1,5 +1,6 @@
 import torch
 import numpy as np
+from inspect import getfullargspec
 from ase.data import atomic_numbers
 from seqm.basics import Parser, Energy
 from seqm.seqm_functions.parameters import params
@@ -17,6 +18,7 @@ default_settings = {
    'sp2'                : [True, 1e-5],
    'parameter_file_dir' : '/home/martin/work/software/PYSEQM/seqm/params/',
    'pair_outer_cutoff'  : 1.0e10, 
+   'Hf_flag'            : False,
    }
 
 
@@ -110,7 +112,7 @@ def get_energy_calculator(species, coordinates, custom_parameters=[], **kwargs):
 
 def get_default_parameters(species, method, parameter_dir, param_list):
     """
-    return default values of specified parameters for atoms in system
+    Returns default values of specified parameters for atoms in system
     """
     elements = [0]+sorted(set(species.reshape(-1).tolist()))
     default_p = params(method=method, elements=elements, \
@@ -119,4 +121,28 @@ def get_default_parameters(species, method, parameter_dir, param_list):
     default_p = default_p[species][0].transpose(0,1).contiguous()
     return default_p
     
+def get_ordered_args(func, **kwargs):
+    """
+    Returns kwarg input to function `func` ordered for position arg input 
+    with default values where kwarg is missing.
+    
+    Parameters:
+    -----------
+    func : callable
+        Function to check for ordered arg input and defaults
+    **kwargs : `key=arg` structure
+        Possible kwarg input to `func`
+    
+    Returns:
+    --------
+    ordered list of input for positional args of `func`
+    """
+    argspec = getfullargspec(func)
+    func_defaults = argspec.defaults
+    func_kwargs = argspec.args[-len(func_defaults):]
+    ordered_args = []
+    for i, key in enumerate(func_kwargs):
+        ordered_args.append(kwargs.get(key,func_defaults[i]))
+    return tuple(ordered_args)
 
+    

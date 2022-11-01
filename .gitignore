@@ -2,6 +2,7 @@
 .idea
 checkpoint
 checkpoint/*
+*.swp
 
 # Operating system related file
 .DS_Store

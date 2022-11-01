@@ -29,11 +29,15 @@ def run_custom_seqc(p, calculator=None, coordinates=None,
     
     Returns
     -------
-    E : torch.tensor, shape (1,)
+    E : torch.Tensor, shape (1,)
         total SCF energy of system (differentiable instance)
-    p : torch.tensor, shape (#custom parameters, nAtoms)
+    Eat : torch.Tensor, shape (1,)
+        atomization energy (differentiable instance)
+    q : torch.Tensor, shape (nAtoms,)
+        atomic charges (Mulliken)?
+    p : torch.Tensor, shape (#custom parameters, nAtoms)
         custom parameters (differentiable instance)
-    coordinates : torch.tensor, shape (nAtoms, 3)
+    coordinates : torch.Tensor, shape (nAtoms, 3)
         atomic positions (differentiable instance)
     
     """
@@ -41,17 +45,38 @@ def run_custom_seqc(p, calculator=None, coordinates=None,
     coordinates.requires_grad_(True)
     p.requires_grad_(True)
     learnedpar = {pname:p[i] for i, pname in enumerate(custom_params)}
-
-    Eel, EnucAB, _, nconv = calculator(const, coordinates, species,
-                                       learnedpar)
-    Etot = Eel.sum() + EnucAB.sum()
-
-    return Etot, p, coordinates
+    
+    res = calculator(const, coordinates, species, learnedpar, all_terms=True)
+    Eat, E, q, nconv = res[0], res[1], res[8], res[9]
+    return E, Eat, q, p, coordinates
     
 
-def seqc_loss(p, popt_list=[], calculator=None, coordinates=None,
-              species=None, Eref=0., Fref=None, with_forces=False,
-              weightE=1., weightF=0., jac=False):
+def atomization_loss(p, popt_list=[], calculator=None, coordinates=None,
+                     species=None, Eref=0., Fref=None, with_forces=False,
+                     weightE=1., weightF=0., jac=False):
+    """
+    If with_forces=False(default): Returns squared loss in atomization energy
+    If with_forces=True: Returns weightE*Loss(Energy) + weightF*Loss(Forces)
+    
+    Parameters:
+    -----------
+    p : ndarray, shape (#custom parameters,)
+        Custom parameters in the format
+            ([[first custom parameter for all atoms],
+              [second custom parameter for all atoms],
+              ..., ]).flatten()
+    popt_list : ndarray(-like), shape (#custom parameters / nAtoms,)
+        names of custom parameters, e.g., ['g_ss', 'zeta_s']
+    calculator : pyseqm.basics.Energy object
+        SE-QC calculator instance for system
+    coordinates : torch.Tensor, shape (nAtoms, 3)
+        atomic positions in Ang
+    species : torch.Tensor, shape (nAtoms,)
+        atomic numbers in system
+    Eref : float or torch.Tensor(float), shape ()
+        reference atomization energy of system in eV
+    """
+    
     if with_forces:
         Fref = torch.as_tensor(Fref, device=device)
         sum_w = weightE + weightF
@@ -61,11 +86,12 @@ def seqc_loss(p, popt_list=[], calculator=None, coordinates=None,
     if not type(p) is torch.Tensor:
         p = torch.as_tensor(p.tolist(), device=device)
     p = p.reshape((len(popt_list),-1))
-    E, p, coordinates = run_custom_seqc(p, calculator=calculator,
-                          coordinates=coordinates, species=species,
-                          custom_params=popt_list)
-    deltaE = E - Eref
-    L = weightE * deltaE*deltaE
+    with torch.autograd.set_detect_anomaly(True):
+        E, Eat, q, p, coordinates = run_custom_seqc(p, calculator=calculator,
+                                    coordinates=coordinates, species=species,
+                                    custom_params=popt_list)
+        deltaE = Eat - Eref
+        L = weightE * deltaE*deltaE
     if with_forces:
         if jac:
             msg  = "!!THERE IS SOMETHING WRONG WITH THE CURRENT "
@@ -74,18 +100,20 @@ def seqc_loss(p, popt_list=[], calculator=None, coordinates=None,
             make_graph = True
         else:
             make_graph = False
-        F = agrad(E, coordinates, create_graph=make_graph)[0][0]
-        deltaF = torch.norm(F - Fref)
-        L = L + weightF * deltaF
+        with torch.autograd.set_detect_anomaly(True):
+            F = agrad(E, coordinates, create_graph=make_graph)[0][0]
+            deltaF2 = torch.square(F - Fref).sum()
+            L = L + weightF * deltaF2
     if jac:
-        dLdp = agrad(L, p)[0]
+        p.grad = None
+        with torch.autograd.set_detect_anomaly(True): dLdp = agrad(L, p)[0]
         return dLdp.flatten()
     return float(L)
     
-def seqc_loss_jac(p, popt_list=[], calculator=None,coordinates=None,
+def atomization_loss_jac(p, popt_list=[], calculator=None,coordinates=None,
               species=None, Eref=0., Fref=None, with_forces=False,
               weightE=1., weightF=0., jac=True):
-    dLdp = seqc_loss(p, popt_list=popt_list, calculator=calculator,
+    dLdp = atomization_loss(p, popt_list=popt_list, calculator=calculator,
               coordinates=coordinates, species=species, Eref=Eref,
               Fref=Fref, with_forces=with_forces, weightE=weightE,
               weightF=weightF, jac=True)

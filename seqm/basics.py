@@ -89,13 +89,15 @@ class Parser(torch.nn.Module):
                                 .reshape(-1)
         #
         paircoord_raw = (coordinates.unsqueeze(1)-coordinates.unsqueeze(2)).reshape(-1,3)
-        pairdist_raw = torch.norm(paircoord_raw,dim=1)
-        close_pairs = pairdist_raw < self.outercutoff
+#        pairdist_raw = torch.norm(paircoord_raw,dim=1)
+        pairdist_raw = torch.square(paircoord_raw).sum(dim=1)
+        close_pairs = pairdist_raw < self.outercutoff**2
 
         pairs = (pair_first<pair_second) * nonblank_pairs * close_pairs
 
         paircoord = paircoord_raw[pairs]
         pairdist = pairdist_raw[pairs]
+        pairdist = torch.sqrt(pairdist)
         rij = pairdist*constansts.length_conversion_factor
 
         idxi = inv_real_atoms[pair_first[pairs]]
@@ -253,15 +255,15 @@ class Energy(torch.nn.Module):
         Constructor
         """
         super().__init__()
-        self.seqm_parameters =seqm_parameters
+        self.seqm_parameters = seqm_parameters
         self.method = seqm_parameters['method']
 
         self.parser = Parser(seqm_parameters)
         self.packpar = Pack_Parameters(seqm_parameters)
         self.hamiltonian = Hamiltonian(seqm_parameters)
-        self.Hf_flag = True
-        if "Hf_flag" in seqm_parameters:
-            self.Hf_flag = seqm_parameters["Hf_flag"]
+        self.Hf_flag = seqm_parameters.get("Hf_flag",True)
+#        if "Hf_flag" in seqm_parameters:
+#            self.Hf_flag = seqm_parameters["Hf_flag"]
         # Hf_flag: true return Hf, false return Etot-Eiso
 
 

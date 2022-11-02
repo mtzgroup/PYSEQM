@@ -76,38 +76,35 @@ def atomization_loss(p, popt_list=[], calculator=None, coordinates=None,
     Eref : float or torch.Tensor(float), shape ()
         reference atomization energy of system in eV
     """
-    
+    make_graph = False
     if with_forces:
         Fref = torch.as_tensor(Fref, device=device)
         sum_w = weightE + weightF
         weightE, weightF = weightE/sum_w, weightF/sum_w
+        if jac:
+            msg  = "!!THERE IS SOMETHING WRONG WITH THE CURRENT "
+            msg += "IMPLEMENTATION OF dFORCE LOSS / dPARAMETERS!!"
+            raise UserWarning(msg)
+            make_graph = True
     else:
         weightE = 1.
     if not type(p) is torch.Tensor:
         p = torch.as_tensor(p.tolist(), device=device)
     p = p.reshape((len(popt_list),-1))
-    with torch.autograd.set_detect_anomaly(True):
-        E, Eat, q, p, coordinates = run_custom_seqc(p, calculator=calculator,
-                                    coordinates=coordinates, species=species,
-                                    custom_params=popt_list)
-        deltaE = Eat - Eref
-        L = weightE * deltaE*deltaE
+    E, Eat, q, p, coordinates = run_custom_seqc(p, calculator=calculator,
+                                coordinates=coordinates, species=species,
+                                custom_params=popt_list)
+    deltaE = Eat - Eref
+    L = weightE * deltaE*deltaE
     if with_forces:
-        if jac:
-            msg  = "!!THERE IS SOMETHING WRONG WITH THE CURRENT "
-            msg += "AUTOGRAD IMPLEMENTATION OF dLOSS/dPARAMETERS!!"
-            raise UserWarning(msg)
-            make_graph = True
-        else:
-            make_graph = False
-        with torch.autograd.set_detect_anomaly(True):
-            F = agrad(E, coordinates, create_graph=make_graph)[0][0]
-            deltaF2 = torch.square(F - Fref).sum()
-            L = L + weightF * deltaF2
+        g = agrad(E, coordinates, create_graph=make_graph)[0][0]
+        F = torch.sum(g, dim=0) - g  # remove COM force
+        deltaF2 = torch.square(F - Fref).sum()
+        Lf = weightF * deltaF2
+        L = L + Lf
     if jac:
-        p.grad = None
-        with torch.autograd.set_detect_anomaly(True): dLdp = agrad(L, p)[0]
-        return dLdp.flatten()
+        dLdp = agrad(L, p)[0]
+        return dLdp.detach().flatten()
     return float(L)
     
 def atomization_loss_jac(p, popt_list=[], calculator=None,coordinates=None,

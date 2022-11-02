@@ -359,17 +359,16 @@ class Force(torch.nn.Module):
 
 
     def forward(self, const, coordinates, species, learned_parameters=dict(), P0=None, step=0, mode=None, *args, **kwargs):
-
+        coordinates.requires_grad_(True)
         Hf, Etot, Eelec, Enuc, Eiso, EnucAB, e, P, charge, notconverged = \
             self.energy(const, coordinates, species, \
                 learned_parameters=learned_parameters, all_terms=True, P0=P0, step=step, *args, **kwargs)
         L = Hf.sum()
         if mode=='new' and self.create_graph:
             gv = [coordinates]
-            gradients  = grad(L, gv,create_graph=self.create_graph)
-            force = -gradients[0]
+            gradients  = grad(L, gv,create_graph=self.create_graph)[0]
+            force = -gradients.clone()
         else:
-            coordinates.requires_grad_(True)
             if const.do_timing: t0 = time.time()
             L.backward(create_graph=self.create_graph)
             if const.do_timing:

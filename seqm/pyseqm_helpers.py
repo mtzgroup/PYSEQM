@@ -2,21 +2,26 @@ import torch
 import numpy as np
 from inspect import getfullargspec
 from ase.data import atomic_numbers
-from seqm.basics import Parser, Energy
+from seqm.basics import Energy
 from seqm.seqm_functions.parameters import params
 
 
 torch.set_default_dtype(torch.float64)
 has_cuda = torch.cuda.is_available()
-device = torch.device('cuda') if has_cuda else torch.device('cpu')
+if has_cuda:
+    device = torch.device('cuda')
+    sp2_def = [True, 1e-5]
+else:
+    device = torch.device('cpu')
+    sp2_def = [False]
+
 
 
 default_settings = {
    'method'             : 'AM1', 
    'scf_eps'            : 1.0e-6, 
    'scf_converger'      : [2,0.0], 
-   'sp2'                : [True, 1e-5],
-   'parameter_file_dir' : '/home/martin/work/software/PYSEQM/seqm/params/',
+   'sp2'                : sp2_def,
    'pair_outer_cutoff'  : 1.0e10, 
    'Hf_flag'            : False,
    }
@@ -99,14 +104,14 @@ class pyseqm_orderator:
 
 def get_energy_calculator(species, coordinates, custom_parameters=[], **kwargs):
     """
-    Creates a pyseqm energy calculator instance
+    Creates a pyseqm calculator instance from `module`.
     """
     elements = [0]+sorted(set(species.reshape(-1).tolist()))
-    settings = default_settings.copy()
-    settings['elements'] = elements
-    settings['learned'] = custom_parameters
-    for key, val in kwargs.items(): settings[key] = val
-    calc = Energy(settings).to(device)
+    seqm_settings = default_settings.copy()
+    seqm_settings['elements'] = elements
+    seqm_settings['learned'] = custom_parameters
+    seqm_settings.update(kwargs)
+    calc = Energy(seqm_settings).to(device)
     return calc
     
 

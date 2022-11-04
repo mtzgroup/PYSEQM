@@ -39,6 +39,8 @@ def run_custom_seqc(p, calculator=None, coordinates=None,
         custom parameters (differentiable instance)
     coordinates : torch.Tensor, shape (nAtoms, 3)
         atomic positions (differentiable instance)
+    nconv : bool
+        whether SCF convergence of SE-QC calculation failed or not
     
     """
     const = Constants().to(device)
@@ -48,7 +50,7 @@ def run_custom_seqc(p, calculator=None, coordinates=None,
     
     res = calculator(const, coordinates, species, learnedpar, all_terms=True)
     Eat, E, q, nconv = res[0], res[1], res[8], res[9]
-    return E, Eat, q, p, coordinates
+    return E, Eat, q, p, coordinates, nconv
     
 
 def atomization_loss(p, popt_list=[], calculator=None, coordinates=None,
@@ -76,6 +78,7 @@ def atomization_loss(p, popt_list=[], calculator=None, coordinates=None,
     Eref : float or torch.Tensor(float), shape ()
         reference atomization energy of system in eV
     """
+    print("Current parameters: ",p.flatten())
     if with_forces:
         Fref = torch.as_tensor(Fref, device=device)
         sum_w = weightE + weightF
@@ -88,9 +91,11 @@ def atomization_loss(p, popt_list=[], calculator=None, coordinates=None,
     if not type(coordinates) is torch.Tensor:
         coordinates = torch.as_tensor(coordinates.tolist(), device=device)
     coordinates.requires_grad_(with_forces)
-    E, Eat, q, p, coordinates = run_custom_seqc(p, calculator=calculator,
+    E, Eat, q, p, coordinates, SCFfail = run_custom_seqc(p, 
+                                calculator=calculator,
                                 coordinates=coordinates, species=species,
                                 custom_params=popt_list)
+    if SCFfail: return 1e10
     deltaE = E.sum() - Eref
     L = weightE * deltaE*deltaE
     if with_forces:
@@ -114,7 +119,8 @@ def atomization_loss_jac(p, popt_list=[], calculator=None,coordinates=None,
     
     NOTE: THIS YIELDS EXACTLY THE SAME RESULTS AS DIRECT autograd(L,p)
     AND THUS ALSO DISAGREES WITH scipy's '2/3-point' NUMERICAL SCHEME
-    (THE PROBLEM APPEARS TO BE IN d^2E / dRdp!)
+    (THE PROBLEM APPEARS TO BE IN d^2E / dRdp, ALMOST CERTAINLY BECAUSE
+     OF LACK OR INSTABILITY IN BACKPROP THROUGH THE SCF CYCLE!)
     """
     if with_forces:
         Fref = torch.as_tensor(Fref, device=device)
@@ -128,9 +134,11 @@ def atomization_loss_jac(p, popt_list=[], calculator=None,coordinates=None,
     if not type(coordinates) is torch.Tensor:
         coordinates = torch.as_tensor(coordinates.tolist(), device=device)
     coordinates.requires_grad_(with_forces)
-    E, Eat, q, p, coordinates = run_custom_seqc(p, calculator=calculator,
+    E, Eat, q, p, coordinates, SCFfail = run_custom_seqc(p, 
+                                calculator=calculator,
                                 coordinates=coordinates, species=species,
                                 custom_params=popt_list)
+    if SCFfail: return 1e10*np.ones_like(p).flatten()
     deltaE = E.sum() - Eref
     dE_dp = agrad(E, p, create_graph=with_forces)[0]
     dE_dp = dE_dp.flatten()
@@ -139,7 +147,6 @@ def atomization_loss_jac(p, popt_list=[], calculator=None,coordinates=None,
         dLf_dp = torch.zeros_like(dE_dp)
         deltaE_dr = agrad(deltaE, coordinates, retain_graph=True)[0]
         for i, dE_dpi in enumerate(dE_dp):
-#            with torch.autograd.detect_anomaly(): doesn't find anything
             d2E_drdpi = agrad(dE_dpi, coordinates, retain_graph=True)[0]
             grad_prod = deltaE_dr * d2E_drdpi
             grad_prod_sum = grad_prod.sum()

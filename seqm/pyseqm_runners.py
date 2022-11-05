@@ -78,7 +78,7 @@ def atomization_loss(p, popt_list=[], calculator=None, coordinates=None,
     Eref : float or torch.Tensor(float), shape ()
         reference atomization energy of system in eV
     """
-    print("Current parameters: ",p.flatten())
+#    print("Current parameters: ",p.flatten())
     if with_forces:
         Fref = torch.as_tensor(Fref, device=device)
         sum_w = weightE + weightF

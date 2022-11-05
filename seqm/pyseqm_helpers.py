@@ -1,6 +1,7 @@
 import torch
 import numpy as np
 from inspect import getfullargspec
+from scipy.optimize import approx_fprime
 from ase.data import atomic_numbers
 from seqm.basics import Energy
 from seqm.seqm_functions.parameters import params
@@ -126,6 +127,7 @@ def get_default_parameters(species, method, parameter_dir, param_list):
     default_p = default_p[species][0].transpose(0,1).contiguous()
     return default_p
     
+
 def get_ordered_args(func, **kwargs):
     """
     Returns kwarg input to function `func` ordered for position arg input 
@@ -150,4 +152,75 @@ def get_ordered_args(func, **kwargs):
         ordered_args.append(kwargs.get(key,func_defaults[i]))
     return tuple(ordered_args)
 
+   
+def post_process_result(result, p_init, loss_func, loss_arguments, nAtoms):
+    p_ref = np.reshape(p_init,(-1,nAtoms))
+    p_opt = np.reshape(result.x,(-1,nAtoms))
+    dp = p_opt - p_ref
+    gradL = approx_fprime(result.x, loss_func, 1.49e-7, *loss_arguments)
+    gradL = np.reshape(gradL,(-1,nAtoms))
+    loss_init = loss_func(p_init, *loss_arguments)
+    loss_opt = loss_func(result.x, *loss_arguments)
+    dloss = loss_opt - loss_init
+    return p_opt, dp, gradL, loss_opt, dloss
     
+
+def write_param_summary(p_opt, dp, loss_opt, dloss, pname_list, symbols, info='Current', 
+                        writer='stdout', close_after=True):
+    nAtoms = len(symbols)
+    if writer == 'stdout':
+        from sys import stdout
+        writer = stdout.writelines
+    elif type(writer) is str:
+        f = open(writer, 'a')
+        writer = f.write
+        close_after = True
+    elif not callable(writer):
+        raise RuntimeError("Input 'writer' has to be 'stdout', file_name, or print/write function.")
+    
+    if (0.01 <= abs(dloss) < 10.):
+        dlstr = '({0: 5.2f})'.format(dloss)
+    else: 
+        dlstr = '({0: 5.2e})'.format(dloss)
+    lstr  = info+' loss (change from default):   '
+    lstr += '{0: 6.3e} '.format(loss_opt)+dlstr
+    writer(lstr+'\n')
+    writer(info+' best parameters (change from default)\n')
+    writer('---------------------------------------\n') 
+    sstr  = '                  '
+    sstr += ''.join(['     {0:6s}         '.format(s) for s in symbols])
+    writer(sstr[:-2]+'\n')
+    for i, pname in enumerate(pname_list):
+        pstr  = ' {0:<12s}: '.format(pname)
+        pstr += ''.join(['{0: 9.4f} ({1: 4.1e})  '.format(p_opt[i,j],dp[i,j]) for j in range(nAtoms)])
+        writer(pstr[:-2]+'\n')
+    if close_after:
+        if hasattr(writer, 'close'): writer.close()
+    return
+
+    
+def write_gradient_summary(gradL, symbols, pname_list, writer='stdout', close_after=True):
+    if writer == 'stdout':
+        from sys import stdout
+        writer = stdout.writelines
+    elif type(writer) is str:
+        f = open(writer, 'a')
+        writer = f.write
+        close_after = True
+    elif not callable(writer):
+        raise RuntimeError("Input 'writer' has to be 'stdout', file_name, or print/write function.")
+    
+    writer('Gradient of loss (dLoss/dparam)\n')
+    sstr  = '                  '
+    sstr += ''.join(['  {0:6s}   '.format(s) for s in symbols])
+    writer(sstr[:-2]+'\n')
+    for i, pname in enumerate(pname_list):
+        gstr  = ' {0:<12s}: '.format(pname)
+        gstr += ''.join(['{0: 5.2e}  '.format(g) for g in gradL[i]])
+        writer(gstr[:-2]+'\n')
+    if close_after:
+        if hasattr(writer, 'close'): writer.close()
+    return
+    
+
+#--EOF--# 

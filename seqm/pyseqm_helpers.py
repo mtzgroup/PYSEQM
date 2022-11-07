@@ -153,20 +153,20 @@ def get_ordered_args(func, **kwargs):
     return tuple(ordered_args)
 
    
-def post_process_result(result, p_init, loss_func, loss_arguments, nAtoms):
+def post_process_result(p, p_init, loss_func, loss_arguments, nAtoms):
     p_ref = np.reshape(p_init,(-1,nAtoms))
-    p_opt = np.reshape(result.x,(-1,nAtoms))
+    p_opt = np.reshape(p,(-1,nAtoms))
     dp = p_opt - p_ref
-    gradL = approx_fprime(result.x, loss_func, 1.49e-7, *loss_arguments)
+    gradL = approx_fprime(p, loss_func, 1.49e-7, *loss_arguments)
     gradL = np.reshape(gradL,(-1,nAtoms))
     loss_init = loss_func(p_init, *loss_arguments)
-    loss_opt = loss_func(result.x, *loss_arguments)
+    loss_opt = loss_func(p, *loss_arguments)
     dloss = loss_opt - loss_init
     return p_opt, dp, gradL, loss_opt, dloss
     
 
-def write_param_summary(p_opt, dp, loss_opt, dloss, pname_list, symbols, info='Current', 
-                        writer='stdout', close_after=True):
+def write_param_summary(p, dp, loss_opt, dloss, pname_list, symbols, 
+                        writer='stdout', ID='#OPTIMIZED', close_after=False):
     nAtoms = len(symbols)
     if writer == 'stdout':
         from sys import stdout
@@ -176,30 +176,42 @@ def write_param_summary(p_opt, dp, loss_opt, dloss, pname_list, symbols, info='C
         writer = f.write
         close_after = True
     elif not callable(writer):
-        raise RuntimeError("Input 'writer' has to be 'stdout', file_name, or print/write function.")
+        msg  = "Input 'writer' has to be 'stdout', file_name, or "
+        msg += "print/write function."
+        raise RuntimeError(msg)
     
+    writer(ID+'\n')
     if (0.01 <= abs(dloss) < 10.):
         dlstr = '({0: 5.2f})'.format(dloss)
     else: 
         dlstr = '({0: 5.2e})'.format(dloss)
-    lstr  = info+' loss (change from default):   '
+    lstr  = '#LOSS (change from default):   '
     lstr += '{0: 6.3e} '.format(loss_opt)+dlstr
     writer(lstr+'\n')
-    writer(info+' best parameters (change from default)\n')
-    writer('---------------------------------------\n') 
+    writer('---------------------------------------\n')
+    writer('#PARAM_OPT: Current optimal parameters\n')
     sstr  = '                  '
     sstr += ''.join(['     {0:6s}         '.format(s) for s in symbols])
     writer(sstr[:-2]+'\n')
     for i, pname in enumerate(pname_list):
         pstr  = ' {0:<12s}: '.format(pname)
-        pstr += ''.join(['{0: 9.4f} ({1: 4.1e})  '.format(p_opt[i,j],dp[i,j]) for j in range(nAtoms)])
+        pstr += ''.join(['{0: 9.4f}  '.format(p[i,j]) for j in range(nAtoms)])
+        writer(pstr[:-2]+'\n')
+    writer('---------------------------------------\n')
+    writer('#DELTA_PARAM: Change from default parameters\n')
+    sstr  = '                  '
+    sstr += ''.join(['     {0:6s}         '.format(s) for s in symbols])
+    writer(sstr[:-2]+'\n')
+    for i, pname in enumerate(pname_list):
+        pstr  = ' {0:<12s}: '.format(pname)
+        pstr += ''.join(['{0: 9.4f}  '.format(dp[i,j]) for j in range(nAtoms)])
         writer(pstr[:-2]+'\n')
     if close_after:
         if hasattr(writer, 'close'): writer.close()
     return
 
     
-def write_gradient_summary(gradL, symbols, pname_list, writer='stdout', close_after=True):
+def write_gradient_summary(gradL, symbols, pname_list, writer='stdout', close_after=False):
     if writer == 'stdout':
         from sys import stdout
         writer = stdout.writelines
@@ -210,7 +222,8 @@ def write_gradient_summary(gradL, symbols, pname_list, writer='stdout', close_af
     elif not callable(writer):
         raise RuntimeError("Input 'writer' has to be 'stdout', file_name, or print/write function.")
     
-    writer('Gradient of loss (dLoss/dparam)\n')
+    writer('---------------------------------------\n')
+    writer('#DLOSS_DPARAM: Gradient of current loss\n')
     sstr  = '                  '
     sstr += ''.join(['  {0:6s}   '.format(s) for s in symbols])
     writer(sstr[:-2]+'\n')

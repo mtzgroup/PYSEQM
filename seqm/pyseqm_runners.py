@@ -55,7 +55,7 @@ def run_custom_seqc(p, calculator=None, coordinates=None,
 
 def atomization_loss(p, popt_list=[], calculator=None, coordinates=None,
                      species=None, Eref=0., Fref=None, with_forces=False,
-                     weightE=1., weightF=0.):
+                     weightE=1., weightF=0., *args, **kwargs):
     """
     If with_forces=False(default): Returns squared loss in atomization energy
     If with_forces=True: Returns weightE*Loss(Energy) + weightF*Loss(Forces)
@@ -78,7 +78,6 @@ def atomization_loss(p, popt_list=[], calculator=None, coordinates=None,
     Eref : float or torch.Tensor(float), shape ()
         reference atomization energy of system in eV
     """
-#    print("Current parameters: ",p.flatten())
     if with_forces:
         Fref = torch.as_tensor(Fref, device=device)
         sum_w = weightE + weightF
@@ -108,7 +107,7 @@ def atomization_loss(p, popt_list=[], calculator=None, coordinates=None,
     
 def atomization_loss_jac(p, popt_list=[], calculator=None,coordinates=None,
               species=None, Eref=0., Fref=None, with_forces=False,
-              weightE=1., weightF=0.):
+              weightE=1., weightF=0., *args, **kwargs):
     """
     Alternative implementation of square loss:
     Assuming Fref = -dEref/dR,

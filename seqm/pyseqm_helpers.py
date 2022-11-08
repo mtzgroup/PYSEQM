@@ -27,6 +27,81 @@ default_settings = {
    'Hf_flag'            : False,
    }
 
+default_bounds = {
+  'AM1': {
+    'U_ss'       : [-640. ,   0.], 
+    'U_pp'       : [-640. ,   0.], 
+    'zeta_s'     : [   0.5,  64.], 
+    'zeta_p'     : [   0.5,  42.], 
+    'zeta_d'     : [   0.5,  42.],
+    'beta_s'     : [-420. ,   0.], 
+    'beta_p'     : [-420. ,   0.], 
+    'g_ss'       : [   0. , 420.], 
+    'g_sp'       : [   0. , 240.], 
+    'g_pp'       : [   0. , 240.], 
+    'g_p2'       : [   0. , 240.], 
+    'h_sp'       : [   0. ,  64.], 
+    'alpha'      : [   0. ,  64.], 
+    'Gaussian1_K': [ -16. ,  16.], 
+    'Gaussian1_L': [   0. ,  96.], 
+    'Gaussian1_M': [   0. ,  64.], 
+    'Gaussian2_K': [ -16. ,  16.], 
+    'Gaussian2_L': [   0. , 128.], 
+    'Gaussian2_M': [   0. ,  64.], 
+    'Gaussian3_K': [  -8. ,  16.], 
+    'Gaussian3_L': [   0. , 128.], 
+    'Gaussian3_M': [   0. ,  64.], 
+    'Gaussian4_K': [  -8. ,   8.], 
+    'Gaussian4_L': [ -16. ,  96.], 
+    'Gaussian4_M': [ -16. ,  72.],
+  },
+  'PM3': {
+    'U_ss'       : [-640. ,   0.],
+    'U_pp'       : [-640. ,   0.],
+    'U_dd'       : [-640. ,   0.],
+    'zeta_s'     : [   0.5,  64.],
+    'zeta_p'     : [   0.5,  42.],
+    'zeta_d'     : [   0.5,  42.],
+    'beta_s'     : [-420. ,   0.],
+    'beta_p'     : [-420. ,   0.],
+    'g_ss'       : [   0. , 420.],
+    'g_sp'       : [   0. , 240.],
+    'g_pp'       : [   0. , 240.],
+    'g_p2'       : [   0. , 240.],
+    'h_sp'       : [   0. ,  64.],
+    'alpha'      : [   0. ,  64.],
+    'Gaussian1_K': [ -16. ,  16.],
+    'Gaussian1_L': [   0. ,  96.],
+    'Gaussian1_M': [   0. ,  64.],
+    'Gaussian2_K': [ -16. ,  16.],
+    'Gaussian2_L': [   0. , 128.],
+    'Gaussian2_M': [   0. ,  64.],
+    'Gaussian3_K': [  -8. ,  16.],
+    'Gaussian3_L': [   0. , 128.],
+    'Gaussian3_M': [   0. ,  64.],
+    'Gaussian4_K': [  -8. ,   8.],
+    'Gaussian4_L': [ -16. ,  96.],
+    'Gaussian4_M': [ -16. ,  72.],
+  },
+  'MNDO': {
+    'U_ss'       : [-640. ,   0.],
+    'U_pp'       : [-640. ,   0.],
+    'U_dd'       : [-640. ,   0.],
+    'zeta_s'     : [   0.5,  42.],
+    'zeta_p'     : [   0.5,  42.],
+    'zeta_d'     : [   0.5,  42.],
+    'beta_s'     : [-420. ,   0.],
+    'beta_p'     : [-420. ,   0.],
+    'g_ss'       : [   0. , 240.],
+    'g_sp'       : [   0. , 240.],
+    'g_pp'       : [   0. , 240.],
+    'g_p2'       : [   0. , 240.],
+    'h_sp'       : [   0. ,  64.],
+    'alpha'      : [   0. ,  64.],
+    'polvom'     : [   0. ,  64.],
+  },
+}
+
 
 class pyseqm_orderator:
     """
@@ -190,8 +265,8 @@ def write_param_summary(p, dp, loss_opt, dloss, pname_list, symbols,
     writer(lstr+'\n')
     writer('---------------------------------------\n')
     writer('#PARAM_OPT: Current optimal parameters\n')
-    sstr  = '                  '
-    sstr += ''.join(['     {0:6s}         '.format(s) for s in symbols])
+    sstr  = '                 '
+    sstr += ''.join(['  {0:6s}   '.format(s) for s in symbols])
     writer(sstr[:-2]+'\n')
     for i, pname in enumerate(pname_list):
         pstr  = ' {0:<12s}: '.format(pname)
@@ -199,8 +274,8 @@ def write_param_summary(p, dp, loss_opt, dloss, pname_list, symbols,
         writer(pstr[:-2]+'\n')
     writer('---------------------------------------\n')
     writer('#DELTA_PARAM: Change from default parameters\n')
-    sstr  = '                  '
-    sstr += ''.join(['     {0:6s}         '.format(s) for s in symbols])
+    sstr  = '                 '
+    sstr += ''.join(['  {0:6s}   '.format(s) for s in symbols])
     writer(sstr[:-2]+'\n')
     for i, pname in enumerate(pname_list):
         pstr  = ' {0:<12s}: '.format(pname)

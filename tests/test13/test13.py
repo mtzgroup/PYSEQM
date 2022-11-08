@@ -72,6 +72,7 @@ Z, maskd, atom_molid, \
 mask, pair_molid, ni, nj, idxi, idxj, xij, rij = parser(const, species, coordinates)
 #add learned parameters
 #here use the data from mopac as example
+homo, lumo = nocc[0]-1, nocc[0]
 
 p=params(method=seqm_parameters['method'],
          elements=seqm_parameters['elements'],
@@ -90,6 +91,8 @@ with torch.autograd.set_detect_anomaly(True):
     eng = Energy(seqm_parameters).to(device)
     Hf, Etot, Eelec, Enuc, Eiso, EnucAB, e, P, charge, notconverged = eng(const, coordinates, species, learned_parameters=learnedpar, all_terms=True)
     #L=Etot.sum()
+    print(repr(e[0][homo]))
+    print(repr(e[0][lumo]))
     L=e[:,orb].sum() # HOMO
     L.backward()
 

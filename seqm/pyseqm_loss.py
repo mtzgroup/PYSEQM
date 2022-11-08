@@ -55,6 +55,8 @@ def run_custom_seqc(p, calculator=None, coordinates=None,
             density matrix
         q : torch.Tensor, shape (nAtoms,)
             atomic charges (Mulliken?) [e]
+        gap : torch.Tensor, shape () / float
+            HOMO-LUMO gap [eV]
         nconv : bool
             whether SCF convergence of SE-QC calculation failed or not
     
@@ -70,8 +72,17 @@ def run_custom_seqc(p, calculator=None, coordinates=None,
     learnedpar = {pname:p[i] for i, pname in enumerate(custom_params)}
     
     res = calculator(const, coordinates, species, learnedpar, all_terms=True)
+    parser = Parser(calculator.seqm_parameters)
+    n_occ = parser(const, species, coordinates)[0][4]
+    homo, lumo = nocc - 1, nocc
+    orb_eigs = res[6]
+    gap = orb_eigs[lumo] - orb_eigs[homo]
+    res = [*res[:-1], gap, res[-1]]
     return p, coordinates, res
     
+
+def clear_results_cache(): run_custom_seqc.cache_clear()
+
 
 def energy_loss(p, popt_list=[], calculator=None, coordinates=None,
                 species=None, Eref=0., *args, **kwargs):
@@ -102,7 +113,7 @@ def energy_loss(p, popt_list=[], calculator=None, coordinates=None,
                                           coordinates=coordinates, 
                                           species=species,
                                           custom_params=popt_list)
-    E, SCFfail = seqm_result[1], seqm_result[9]
+    E, SCFfail = res[1], res[-1]
     if SCFfail: return 1e10
     deltaE = E.sum() - Eref
     L = deltaE*deltaE
@@ -118,6 +129,7 @@ def energy_loss_jac(p, popt_list=[], calculator=None, coordinates=None,
                                           coordinates=coordinates,
                                           species=species,
                                           custom_params=popt_list)
+    E, SCFfail = res[1], res[-1]
     if SCFfail: return 1e10*np.ones_like(p).flatten()
     deltaE = E.sum() - Eref
     dE_dp = agrad(E, p)[0]
@@ -163,7 +175,7 @@ def force_loss(p, popt_list=[], calculator=None, coordinates=None,
                                           coordinates=coordinates,
                                           species=species,
                                           custom_params=popt_list)
-    E, SCFfail = res[1], res[9]
+    E, SCFfail = res[1], res[-1]
     if SCFfail: return 1e10
     F = -agrad(E, coordinates)[0][0]
     F = F - torch.sum(F, dim=0)  # remove COM force
@@ -190,7 +202,7 @@ def force_loss_jac(p, popt_list=[], calculator=None,coordinates=None,
                                           coordinates=coordinates,
                                           species=species,
                                           custom_params=popt_list)
-    E, SCFfail = res[1], res[9]
+    E, SCFfail = res[1], res[-1]
     if SCFfail: return 1e10*np.ones_like(p).flatten()
     F = -agrad(E, coordinates, create_graph=True)[0][0]
     F = F - torch.sum(F, dim=0)  # remove COM force
@@ -243,15 +255,14 @@ def gap_loss(p, popt_list=[], calculator=None, coordinates=None,
                                           coordinates=coordinates,
                                           species=species,
                                           custom_params=popt_list)
-    orb_enes, SCFfail = res[6], res[9]
+    gap, SCFfail = res[9], res[-1]
     if SCFfail: return 1e10
-    ## get gap from orb_enes!
     deltaG = gap - gap_ref
     L = deltaG * deltaG
     return L.detach().numpy()
 
-def gap_loss(p, popt_list=[], calculator=None, coordinates=None,
-             species=None, gap_ref=0., *args, **kwargs):
+def gap_loss_jac(p, popt_list=[], calculator=None, coordinates=None,
+                 species=None, gap_ref=0., *args, **kwargs):
     """
     Returns squared loss in atomic forces
     
@@ -283,12 +294,23 @@ def gap_loss(p, popt_list=[], calculator=None, coordinates=None,
                                           coordinates=coordinates,
                                           species=species,
                                           custom_params=popt_list)
-    orb_enes, SCFfail = res[6], res[9]
+    gap, SCFfail = res[9], res[-1]
     if SCFfail: return 1e10
-    ## get gap from orb_enes!
     deltaG = gap - gap_ref
     L = deltaG * deltaG
     dL_dp = agrad(L, p)[0]
     return dL_dp.detach().numpy().flatten()
     
 
+
+def loss_constructor():
+    """
+    Return custom loss function.
+    """
+    e_args = get_ordered_args(energy_loss, ...)
+    f_args = get_ordered_args(force_loss, ...)
+    g_args = get_ordered_args(gap_loss, ...)
+    
+    def combined_loss():
+    
+    return combined_loss, loss_arguments

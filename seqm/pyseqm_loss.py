@@ -85,7 +85,7 @@ def clear_results_cache(): run_calculation.cache_clear()
 def energy_loss(p, popt_list=[], calculator=None, coordinates=None,
                 species=None, Eref=0.):
     """
-    Returns squared loss in energy
+    Returns squared loss in energy per atom
     
     Parameters:
     -----------
@@ -113,13 +113,13 @@ def energy_loss(p, popt_list=[], calculator=None, coordinates=None,
     E, SCFfail = res[1], res[-1]
     if SCFfail: return 1e10
     deltaE = E.sum() - Eref
-    L = deltaE*deltaE
+    L = deltaE*deltaE / species.shape[0]
     return L.detach().numpy()
     
 def energy_loss_jac(p, popt_list=[], calculator=None, coordinates=None,
               species=None, Eref=0.):
     """
-    Gradient of square loss in energy
+    Gradient of square loss in energy per atom
     """
     p, coordinates, res = run_calculation(p, 
                                           calculator=calculator,
@@ -131,14 +131,14 @@ def energy_loss_jac(p, popt_list=[], calculator=None, coordinates=None,
     deltaE = E.sum() - Eref
     dE_dp = agrad(E, p)[0]
     dE_dp = dE_dp.flatten()
-    dL_dp = deltaE * dE_dp
+    dL_dp = deltaE * dE_dp / species.shape[0]
     return 2.0 * dL_dp.detach().numpy()
     
 
 def forces_loss(p, popt_list=[], calculator=None, coordinates=None,
                 species=None, Fref=None):
     """
-    Returns squared loss in atomic forces
+    Returns squared loss in atomic forces per atom
     
     Parameters:
     -----------
@@ -168,13 +168,13 @@ def forces_loss(p, popt_list=[], calculator=None, coordinates=None,
     if SCFfail: return 1e10
     F = -agrad(E, coordinates)[0][0]
     F = F - torch.sum(F, dim=0)  # remove COM force
-    L = torch.square(F - Fref).sum()
+    L = torch.square(F - Fref).sum() / species.shape[0]
     return L.detach().numpy()
     
 def force_loss_jac(p, popt_list=[], calculator=None,coordinates=None,
                    species=None, Fref=0., *args, **kwargs):
     """
-    Gradient of square loss of forces
+    Gradient of square loss of forces per atom
     
     #Alternative implementation:
     #Assuming Fref = -dEref/dR,
@@ -196,7 +196,7 @@ def force_loss_jac(p, popt_list=[], calculator=None,coordinates=None,
     F = -agrad(E, coordinates, create_graph=True)[0][0]
     F = F - torch.sum(F, dim=0)  # remove COM force
     L = torch.square(F - Fref).sum()
-    dL_dp = agrad(L, p)[0]
+    dL_dp = agrad(L, p)[0] / species.shape[0]
     return dL_dp.detach().numpy().flatten()
 #    deltaE = E.sum() - Eref
 #    dE_dp = agrad(E, p, create_graph=with_forces)[0]

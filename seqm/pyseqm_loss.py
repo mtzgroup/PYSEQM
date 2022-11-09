@@ -197,7 +197,7 @@ def force_loss_jac(p, popt_list=[], calculator=None,coordinates=None,
     F = F - torch.sum(F, dim=0)  # remove COM force
     L = torch.square(F - Fref).sum()
     dL_dp = agrad(L, p)[0]
-    return dL_dp#.detach().numpy().flatten()
+    return dL_dp.detach().numpy().flatten()
 #    deltaE = E.sum() - Eref
 #    dE_dp = agrad(E, p, create_graph=with_forces)[0]
 #    dE_dp = dE_dp.flatten()
@@ -234,7 +234,7 @@ def gap_loss(p, popt_list=[], calculator=None, coordinates=None,
     gap_ref : float or torch.Tensor, shape ()
         reference HOMO-LUMO gap in eV
     """
-    p, coordinates, res = run_ccalculation(p,
+    p, coordinates, res = run_calculation(p,
                                           calculator=calculator,
                                           coordinates=coordinates,
                                           species=species,
@@ -281,7 +281,6 @@ def gap_loss_jac(p, popt_list=[], calculator=None, coordinates=None,
     return dL_dp.detach().numpy().flatten()
     
 
-
 class LossConstructor:
     def __init__(self, **kwargs):
         self.L = 0.
@@ -297,6 +296,7 @@ class LossConstructor:
         L = 0.
         for prop in self.include:
             L_i = eval(prop+'_loss(p, *self.'+prop+'_args)')
+            exec('self.'+prop+'_loss_val = L_i')
             L += eval('self.weight_'+prop+' * L_i')
         clear_results_cache()
         return L
@@ -309,3 +309,26 @@ class LossConstructor:
         kwargs.update(self.general_kwargs)
         exec('self.'+prop+'_args = get_ordered_args('+prop+'_loss, **kwargs)')
         
+    def get_individual_loss(self, prop, include_weight=False):
+        """
+        Return SQUARED loss of property as included in total loss function
+        
+        Parameters:
+        -----------
+        prop : str
+            property to return loss value for ('energy', 'forces', ...)
+        include_weight : bool (optional, default: False)
+            Whether or not to scale squared loss with corresponding weight
+            (i.e., as it enters the total loss)
+        """
+        if not hasattr(self, prop+'_loss_val'):
+            raise ValueError("Loss for property '"+prop+"' not available.")
+        if include_weight:
+            out = eval('self.'+prop+'_loss_val * self.weight_'+prop)
+        else:
+            out = eval('self.'+prop+'_loss_val')
+        if type(out) in [np.ndarray, list]:
+            if np.size(out) == 1: out = float(out)
+        return out
+        
+

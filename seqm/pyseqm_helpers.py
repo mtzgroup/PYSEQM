@@ -236,26 +236,34 @@ def post_process_result(p, p_init, loss_func, nAtoms):
     gradL = approx_fprime(p, loss_func, 1.49e-7)
     gradL = np.reshape(gradL,(-1,nAtoms))
     loss_init = loss_func(p_init)
+    if type(loss_init) in [np.ndarray, list]:
+        if np.size(loss_init) == 1: loss_init = float(loss_init)
     loss_opt = loss_func(p)
+    if type(loss_opt) in [np.ndarray, list]:
+        if np.size(loss_opt) == 1: loss_opt = float(loss_opt)
     dloss = loss_opt - loss_init
     return p_opt, dp, gradL, loss_opt, dloss
+    
+
+def get_writer(writer_in, closing_in=False):
+    if writer_in == 'stdout':
+        from sys import stdout
+        writer_in = stdout.writelines
+    elif type(writer_in) is str:
+        f = open(writer_in, 'a')
+        writer_in = f.write
+        closing_in = True
+    elif not callable(writer_in):
+        msg  = "Input 'writer' has to be 'stdout', file_name, or "
+        msg += "print/write function."
+        raise RuntimeError(msg)
+    return writer_in, closing_in
     
 
 def write_param_summary(p, dp, loss_opt, dloss, pname_list, symbols, 
                         writer='stdout', ID='#OPTIMIZED', close_after=False):
     nAtoms = len(symbols)
-    if writer == 'stdout':
-        from sys import stdout
-        writer = stdout.writelines
-    elif type(writer) is str:
-        f = open(writer, 'a')
-        writer = f.write
-        close_after = True
-    elif not callable(writer):
-        msg  = "Input 'writer' has to be 'stdout', file_name, or "
-        msg += "print/write function."
-        raise RuntimeError(msg)
-    
+    writer, close_after = get_writer(writer, close_after)
     writer(ID+'\n')
     if (0.01 <= abs(dloss) < 10.):
         dlstr = '({0: 5.2f})'.format(dloss)
@@ -288,16 +296,7 @@ def write_param_summary(p, dp, loss_opt, dloss, pname_list, symbols,
 
     
 def write_gradient_summary(gradL, symbols, pname_list, writer='stdout', close_after=False):
-    if writer == 'stdout':
-        from sys import stdout
-        writer = stdout.writelines
-    elif type(writer) is str:
-        f = open(writer, 'a')
-        writer = f.write
-        close_after = True
-    elif not callable(writer):
-        raise RuntimeError("Input 'writer' has to be 'stdout', file_name, or print/write function.")
-    
+    writer, close_after = get_writer(writer, close_after)
     writer('---------------------------------------\n')
     writer('#DLOSS_DPARAM: Gradient of current loss\n')
     sstr  = '                  '

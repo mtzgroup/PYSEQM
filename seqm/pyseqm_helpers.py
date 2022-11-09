@@ -19,12 +19,12 @@ else:
 
 
 default_settings = {
-   'method'             : 'AM1', 
-   'scf_eps'            : 1.0e-6, 
-   'scf_converger'      : [2,0.0], 
-   'sp2'                : sp2_def,
-   'pair_outer_cutoff'  : 1.0e10, 
-   'Hf_flag'            : False,
+    'method'             : 'AM1', 
+    'scf_eps'            : 1.0e-6, 
+    'scf_converger'      : [2,0.0], 
+    'sp2'                : sp2_def,
+    'pair_outer_cutoff'  : 1.0e10, 
+    'Hf_flag'            : False,
    }
 
 default_bounds = {
@@ -178,7 +178,7 @@ class pyseqm_orderator:
         return output
         
 
-def get_energy_calculator(species, coordinates, custom_parameters=[], **kwargs):
+def get_energy_calculator(species, coordinates, custom_parameters=(), **kwargs):
     """
     Creates a pyseqm calculator instance from `module`.
     """
@@ -186,6 +186,7 @@ def get_energy_calculator(species, coordinates, custom_parameters=[], **kwargs):
     seqm_settings = default_settings.copy()
     seqm_settings['elements'] = elements
     seqm_settings['learned'] = custom_parameters
+    seqm_settings['eig'] = True
     seqm_settings.update(kwargs)
     calc = Energy(seqm_settings).to(device)
     return calc
@@ -228,14 +229,14 @@ def get_ordered_args(func, **kwargs):
     return tuple(ordered_args)
 
    
-def post_process_result(p, p_init, loss_func, loss_arguments, nAtoms):
+def post_process_result(p, p_init, loss_func, nAtoms):
     p_ref = np.reshape(p_init,(-1,nAtoms))
     p_opt = np.reshape(p,(-1,nAtoms))
     dp = p_opt - p_ref
-    gradL = approx_fprime(p, loss_func, 1.49e-7, *loss_arguments)
+    gradL = approx_fprime(p, loss_func, 1.49e-7)
     gradL = np.reshape(gradL,(-1,nAtoms))
-    loss_init = loss_func(p_init, *loss_arguments)
-    loss_opt = loss_func(p, *loss_arguments)
+    loss_init = loss_func(p_init)
+    loss_opt = loss_func(p)
     dloss = loss_opt - loss_init
     return p_opt, dp, gradL, loss_opt, dloss
     

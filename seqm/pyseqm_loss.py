@@ -2,7 +2,9 @@ import numpy as np
 import torch
 from functools import lru_cache
 from torch.autograd import grad as agrad
+from seqm.basics import Parser
 from seqm.seqm_functions.constants import Constants
+from seqm.pyseqm_helpers import get_ordered_args
 
 
 torch.set_default_dtype(torch.float64)
@@ -10,23 +12,23 @@ has_cuda = torch.cuda.is_available()
 device = torch.device('cuda') if has_cuda else torch.device('cpu')
 
 
-@lru_cache(maxsize=156, typed=False)
-def run_custom_seqc(p, calculator=None, coordinates=None,
-                    species=None, custom_params=[]):
+@lru_cache(maxsize=16)
+def run_calculation(p, calculator=None, coordinates=None,
+                    species=None, custom_params=()):
     """
     Returns total energy of SEQC calculation with custom parameters.
     
-    Parameters
+    Parameters (due to lru_cache, all inputs must be hashable!)
     ----------
-    p : Tensor, shape (number of custom parameters, number of atoms)
-        array of custom parameters
+    p : torch.Tensor, shape (#custom parameters,)
+        custom parameters
     calculator : pyseqm Energy calculator object
         list of names of custom parameters as used in parameter file
     coordinates : Tensor, shape (nAtoms, 3)
         atomic positions in Angstrom
     species : Tensor, shape (nAtoms,)
         atomic numbers in descending order (coordinates accordingly)
-    custom_params : list
+    custom_params : tuple
         names of custom parameters defined in p
     
     Returns
@@ -61,11 +63,7 @@ def run_custom_seqc(p, calculator=None, coordinates=None,
             whether SCF convergence of SE-QC calculation failed or not
     
     """
-    if not type(p) is torch.Tensor:
-        p = torch.tensor(p.tolist(), device=device, requires_grad=True)
-    p = p.reshape((len(popt_list),-1))
-    if not type(coordinates) is torch.Tensor:
-        coordinates = torch.as_tensor(coordinates.tolist(), device=device)
+    p = p.reshape((len(custom_params),-1))
     const = Constants().to(device)
     coordinates.requires_grad_(True)
     p.requires_grad_(True)
@@ -73,31 +71,30 @@ def run_custom_seqc(p, calculator=None, coordinates=None,
     
     res = calculator(const, coordinates, species, learnedpar, all_terms=True)
     parser = Parser(calculator.seqm_parameters)
-    n_occ = parser(const, species, coordinates)[0][4]
-    homo, lumo = nocc - 1, nocc
-    orb_eigs = res[6]
+    n_occ = parser(const, species, coordinates)[4]
+    homo, lumo = n_occ - 1, n_occ
+    orb_eigs = res[6][0]
     gap = orb_eigs[lumo] - orb_eigs[homo]
     res = [*res[:-1], gap, res[-1]]
     return p, coordinates, res
     
 
-def clear_results_cache(): run_custom_seqc.cache_clear()
+def clear_results_cache(): run_calculation.cache_clear()
 
 
 def energy_loss(p, popt_list=[], calculator=None, coordinates=None,
-                species=None, Eref=0., *args, **kwargs):
+                species=None, Eref=0.):
     """
-    If with_forces=False(default): Returns squared loss in atomization energy
-    If with_forces=True: Returns weightE*Loss(Energy) + weightF*Loss(Forces)
+    Returns squared loss in energy
     
     Parameters:
     -----------
-    p : ndarray, shape (#custom parameters,)
+    p : torch.Tensor, shape (#custom parameters,)
         Custom parameters in the format
             ([[first custom parameter for all atoms],
               [second custom parameter for all atoms],
               ..., ]).flatten()
-    popt_list : ndarray(-like), shape (#custom parameters / nAtoms,)
+    popt_list : tuple, len #custom parameters / nAtoms
         names of custom parameters, e.g., ['g_ss', 'zeta_s']
     calculator : pyseqm.basics.Energy object
         SE-QC calculator instance for system
@@ -108,7 +105,7 @@ def energy_loss(p, popt_list=[], calculator=None, coordinates=None,
     Eref : float or torch.Tensor(float), shape ()
         reference energy of system in eV
     """
-    p, coordinates, res = run_custom_seqc(p, 
+    p, coordinates, res = run_calculation(p, 
                                           calculator=calculator,
                                           coordinates=coordinates, 
                                           species=species,
@@ -120,11 +117,11 @@ def energy_loss(p, popt_list=[], calculator=None, coordinates=None,
     return L.detach().numpy()
     
 def energy_loss_jac(p, popt_list=[], calculator=None, coordinates=None,
-              species=None, Eref=0., *args, **kwargs):
+              species=None, Eref=0.):
     """
     Gradient of square loss in energy
     """
-    p, coordinates, res = run_custom_seqc(p, 
+    p, coordinates, res = run_calculation(p, 
                                           calculator=calculator,
                                           coordinates=coordinates,
                                           species=species,
@@ -138,19 +135,19 @@ def energy_loss_jac(p, popt_list=[], calculator=None, coordinates=None,
     return 2.0 * dL_dp.detach().numpy()
     
 
-def force_loss(p, popt_list=[], calculator=None, coordinates=None,
-                species=None, Fref=None, *args, **kwargs):
+def forces_loss(p, popt_list=[], calculator=None, coordinates=None,
+                species=None, Fref=None):
     """
     Returns squared loss in atomic forces
     
     Parameters:
     -----------
-    p : ndarray, shape (#custom parameters,)
+    p : torch.Tensor, shape (#custom parameters,)
         Custom parameters in the format
             ([[first custom parameter for all atoms],
               [second custom parameter for all atoms],
               ..., ]).flatten()
-    popt_list : ndarray(-like), shape (#custom parameters / nAtoms,)
+    popt_list : tuple, len #custom parameters / nAtoms
         names of custom parameters, e.g., ['g_ss', 'zeta_s']
     calculator : pyseqm.basics.Energy object
         SE-QC calculator instance for system
@@ -161,16 +158,8 @@ def force_loss(p, popt_list=[], calculator=None, coordinates=None,
     Fref : torch.Tensor, shape (nAtoms, 3)
         reference forces (-gradient) of system in eV/Ang
     """
-    if Fref is None:
-        Fref = torch.zeros_like(coordinates, device=device)
     Fref = torch.as_tensor(Fref, device=device)
-    if not type(p) is torch.Tensor:
-        p = torch.tensor(p.tolist(), device=device, requires_grad=True)
-    p = p.reshape((len(popt_list),-1))
-    if not type(coordinates) is torch.Tensor:
-        coordinates = torch.as_tensor(coordinates.tolist(), device=device)
-    coordinates.requires_grad_(True)
-    p, coordinates, res = run_custom_seqc(p,
+    p, coordinates, res = run_calculation(p,
                                           calculator=calculator,
                                           coordinates=coordinates,
                                           species=species,
@@ -197,7 +186,7 @@ def force_loss_jac(p, popt_list=[], calculator=None,coordinates=None,
     #(THE PROBLEM APPEARS TO BE IN d^2E / dRdp, ALMOST CERTAINLY BECAUSE
     # OF LACK OR INSTABILITY IN BACKPROP THROUGH THE SCF CYCLE!)
     """
-    p, coordinates, res = run_custom_seqc(p,
+    p, coordinates, res = run_calculation(p,
                                           calculator=calculator,
                                           coordinates=coordinates,
                                           species=species,
@@ -208,7 +197,7 @@ def force_loss_jac(p, popt_list=[], calculator=None,coordinates=None,
     F = F - torch.sum(F, dim=0)  # remove COM force
     L = torch.square(F - Fref).sum()
     dL_dp = agrad(L, p)[0]
-    return dL_dp.detach().numpy().flatten()
+    return dL_dp#.detach().numpy().flatten()
 #    deltaE = E.sum() - Eref
 #    dE_dp = agrad(E, p, create_graph=with_forces)[0]
 #    dE_dp = dE_dp.flatten()
@@ -229,12 +218,12 @@ def gap_loss(p, popt_list=[], calculator=None, coordinates=None,
     
     Parameters:
     -----------
-    p : ndarray, shape (#custom parameters,)
+    p : torch.Tensor, shape (#custom parameters,)
         Custom parameters in the format
             ([[first custom parameter for all atoms],
               [second custom parameter for all atoms],
               ..., ]).flatten()
-    popt_list : ndarray(-like), shape (#custom parameters / nAtoms,)
+    popt_list : tuple, len #custom parameters / nAtoms
         names of custom parameters, e.g., ['g_ss', 'zeta_s']
     calculator : pyseqm.basics.Energy object
         SE-QC calculator instance for system
@@ -245,12 +234,7 @@ def gap_loss(p, popt_list=[], calculator=None, coordinates=None,
     gap_ref : float or torch.Tensor, shape ()
         reference HOMO-LUMO gap in eV
     """
-    if not type(p) is torch.Tensor:
-        p = torch.tensor(p.tolist(), device=device, requires_grad=True)
-    p = p.reshape((len(popt_list),-1))
-    if not type(coordinates) is torch.Tensor:
-        coordinates = torch.as_tensor(coordinates.tolist(), device=device)
-    p, coordinates, res = run_custom_seqc(p,
+    p, coordinates, res = run_ccalculation(p,
                                           calculator=calculator,
                                           coordinates=coordinates,
                                           species=species,
@@ -268,12 +252,12 @@ def gap_loss_jac(p, popt_list=[], calculator=None, coordinates=None,
     
     Parameters:
     -----------
-    p : ndarray, shape (#custom parameters,)
+    p : torch.Tensor, shape (#custom parameters,)
         Custom parameters in the format
             ([[first custom parameter for all atoms],
               [second custom parameter for all atoms],
               ..., ]).flatten()
-    popt_list : ndarray(-like), shape (#custom parameters / nAtoms,)
+    popt_list : tuple, len #custom parameters / nAtoms
         names of custom parameters, e.g., ['g_ss', 'zeta_s']
     calculator : pyseqm.basics.Energy object
         SE-QC calculator instance for system
@@ -284,12 +268,7 @@ def gap_loss_jac(p, popt_list=[], calculator=None, coordinates=None,
     gap_ref : float or torch.Tensor, shape ()
         reference HOMO-LUMO gap in eV
     """
-    if not type(p) is torch.Tensor:
-        p = torch.tensor(p.tolist(), device=device, requires_grad=True)
-    p = p.reshape((len(popt_list),-1))
-    if not type(coordinates) is torch.Tensor:
-        coordinates = torch.as_tensor(coordinates.tolist(), device=device)
-    p, coordinates, res = run_custom_seqc(p,
+    p, coordinates, res = run_calculation(p,
                                           calculator=calculator,
                                           coordinates=coordinates,
                                           species=species,
@@ -303,14 +282,30 @@ def gap_loss_jac(p, popt_list=[], calculator=None, coordinates=None,
     
 
 
-def loss_constructor():
-    """
-    Return custom loss function.
-    """
-    e_args = get_ordered_args(energy_loss, ...)
-    f_args = get_ordered_args(force_loss, ...)
-    g_args = get_ordered_args(gap_loss, ...)
+class LossConstructor:
+    def __init__(self, **kwargs):
+        self.L = 0.
+        self.include = []
+        req = ['popt_list', 'calculator', 'coordinates', 'species']
+        if any(required not in kwargs for required in req):
+            msg = "Please specify'"+"', '".join(req)+"' as kwargs!"
+            raise ValueError(msg)
+        self.general_kwargs = kwargs
     
-    def combined_loss():
-    
-    return combined_loss, loss_arguments
+    def __call__(self, p, *args, **kwargs):
+        p = torch.as_tensor(p, device=device)
+        L = 0.
+        for prop in self.include:
+            L_i = eval(prop+'_loss(p, *self.'+prop+'_args)')
+            L += eval('self.weight_'+prop+' * L_i')
+        clear_results_cache()
+        return L
+        
+    def add_loss(self, prop, weight=1., **kwargs):
+        if prop not in ['energy','forces','gap']:
+            raise ValueError()
+        self.include.append(prop)
+        exec('self.weight_'+prop+' = weight')
+        kwargs.update(self.general_kwargs)
+        exec('self.'+prop+'_args = get_ordered_args('+prop+'_loss, **kwargs)')
+        

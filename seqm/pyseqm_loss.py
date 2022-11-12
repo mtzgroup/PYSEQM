@@ -129,7 +129,7 @@ def energy_loss_jac(p, popt_list=[], calculator=None, coordinates=None,
     E, SCFfail = res[1], res[-1]
     if SCFfail: return 1e10*np.ones_like(p).flatten()
     deltaE = E.sum() - Eref
-    dE_dp = agrad(E, p)[0]
+    dE_dp = agrad(E, p, retain_graph=True)[0]
     dE_dp = dE_dp.flatten()
     dL_dp = deltaE * dE_dp / species.shape[0]
     return 2.0 * dL_dp.detach().numpy()
@@ -171,7 +171,7 @@ def forces_loss(p, popt_list=[], calculator=None, coordinates=None,
     L = torch.square(F - Fref).sum() / species.shape[0]
     return L.detach().numpy()
     
-def force_loss_jac(p, popt_list=[], calculator=None,coordinates=None,
+def forces_loss_jac(p, popt_list=[], calculator=None,coordinates=None,
                    species=None, Fref=0., *args, **kwargs):
     """
     Gradient of square loss of forces per atom
@@ -195,11 +195,11 @@ def force_loss_jac(p, popt_list=[], calculator=None,coordinates=None,
     if SCFfail: return 1e10*np.ones_like(p).flatten()
     F = -agrad(E, coordinates, create_graph=True)[0][0]
     F = F - torch.sum(F, dim=0)  # remove COM force
-    L = torch.square(F - Fref).sum()
-    dL_dp = agrad(L, p)[0] / species.shape[0]
+    L = torch.square(F - Fref).sum() / species.shape[0]
+    dL_dp = agrad(L, p, retain_graph=True)[0]
     return dL_dp.detach().numpy().flatten()
 #    deltaE = E.sum() - Eref
-#    dE_dp = agrad(E, p, create_graph=with_forces)[0]
+#    dE_dp = agrad(E, p, create_graph=True)[0]
 #    dE_dp = dE_dp.flatten()
 #    dL_dp = torch.zeros_like(dE_dp)
 #    deltaE_dr = agrad(deltaE, coordinates, retain_graph=True)[0]
@@ -277,7 +277,7 @@ def gap_loss_jac(p, popt_list=[], calculator=None, coordinates=None,
     if SCFfail: return 1e10
     deltaG = gap - gap_ref
     L = deltaG * deltaG
-    dL_dp = agrad(L, p)[0]
+    dL_dp = agrad(L, p, retain_graph=True)[0]
     return dL_dp.detach().numpy().flatten()
     
 
@@ -294,13 +294,29 @@ class LossConstructor:
     def __call__(self, p, *args, **kwargs):
         p = torch.as_tensor(p, device=device)
         L = 0.
+        clear_results_cache()
         for prop in self.include:
             L_i = eval(prop+'_loss(p, *self.'+prop+'_args)')
             exec('self.'+prop+'_loss_val = L_i')
             L += eval('self.weight_'+prop+' * L_i')
         clear_results_cache()
         return L
-        
+    
+    def loss_and_jac(self, p, *args, **kwargs):
+        p = torch.as_tensor(p, device=device)
+        L, dLdp = 0., np.zeros_like(p)
+        clear_results_cache()
+        for prop in self.include:
+            L_i = eval(prop+'_loss(p, *self.'+prop+'_args)')
+            dLdp_i = eval(prop+'_loss_jac(p, *self.'+prop+'_args)')
+            exec('self.'+prop+'_loss_val = L_i')
+            exec('self.'+prop+'_loss_grad = dLdp_i')
+            L += eval('self.weight_'+prop+' * L_i')
+            dLdp += eval('self.weight_'+prop+' * dLdp_i')
+        print(dLdp.reshape((3,-1)))
+        clear_results_cache()
+        return (L, dLdp)
+    
     def add_loss(self, prop, weight=1., **kwargs):
         if prop not in ['energy','forces','gap']:
             raise ValueError()

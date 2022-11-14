@@ -69,13 +69,17 @@ def run_calculation(p, calculator=None, coordinates=None,
     p.requires_grad_(True)
     learnedpar = {pname:p[i] for i, pname in enumerate(custom_params)}
     
-    res = calculator(const, coordinates, species, learnedpar, all_terms=True)
-    parser = Parser(calculator.seqm_parameters)
-    n_occ = parser(const, species, coordinates)[4]
-    homo, lumo = n_occ - 1, n_occ
-    orb_eigs = res[6][0]
-    gap = orb_eigs[lumo] - orb_eigs[homo]
-    res = [*res[:-1], gap, res[-1]]
+    try:  # calculation might fail for given choice of parameters
+        res = calculator(const, coordinates, species, learnedpar, all_terms=True)
+        parser = Parser(calculator.seqm_parameters)
+        n_occ = parser(const, species, coordinates)[4]
+        homo, lumo = n_occ - 1, n_occ
+        orb_eigs = res[6][0]
+        gap = orb_eigs[lumo] - orb_eigs[homo]
+        res = [*res[:-1], gap, res[-1]]
+    except RuntimeError:
+        res = [None,]*11
+        res[-1] = True
     return p, coordinates, res
     
 
@@ -111,7 +115,7 @@ def energy_loss(p, popt_list=[], calculator=None, coordinates=None,
                                           species=species,
                                           custom_params=popt_list)
     E, SCFfail = res[1], res[-1]
-    if SCFfail: return 1e10
+    if SCFfail: return 1e12
     deltaE = E.sum() - Eref
     L = deltaE*deltaE / species.shape[0]
     return L.detach().numpy()
@@ -127,7 +131,7 @@ def energy_loss_jac(p, popt_list=[], calculator=None, coordinates=None,
                                           species=species,
                                           custom_params=popt_list)
     E, SCFfail = res[1], res[-1]
-    if SCFfail: return 1e10*np.ones_like(p).flatten()
+    if SCFfail: return 1e12*np.ones_like(p).flatten()
     deltaE = E.sum() - Eref
     dE_dp = agrad(E, p, retain_graph=True)[0]
     dE_dp = dE_dp.flatten()
@@ -165,7 +169,7 @@ def forces_loss(p, popt_list=[], calculator=None, coordinates=None,
                                           species=species,
                                           custom_params=popt_list)
     E, SCFfail = res[1], res[-1]
-    if SCFfail: return 1e10
+    if SCFfail: return 1e12
     F = -agrad(E, coordinates)[0][0]
     F = F - torch.sum(F, dim=0)  # remove COM force
     L = torch.square(F - Fref).sum() / species.shape[0]
@@ -192,7 +196,7 @@ def forces_loss_jac(p, popt_list=[], calculator=None,coordinates=None,
                                           species=species,
                                           custom_params=popt_list)
     E, SCFfail = res[1], res[-1]
-    if SCFfail: return 1e10*np.ones_like(p).flatten()
+    if SCFfail: return 1e12*np.ones_like(p).flatten()
     F = -agrad(E, coordinates, create_graph=True)[0][0]
     F = F - torch.sum(F, dim=0)  # remove COM force
     L = torch.square(F - Fref).sum() / species.shape[0]
@@ -240,7 +244,7 @@ def gap_loss(p, popt_list=[], calculator=None, coordinates=None,
                                           species=species,
                                           custom_params=popt_list)
     gap, SCFfail = res[9], res[-1]
-    if SCFfail: return 1e10
+    if SCFfail: return 1e12
     deltaG = gap - gap_ref
     L = deltaG * deltaG
     return L.detach().numpy()
@@ -274,7 +278,7 @@ def gap_loss_jac(p, popt_list=[], calculator=None, coordinates=None,
                                           species=species,
                                           custom_params=popt_list)
     gap, SCFfail = res[9], res[-1]
-    if SCFfail: return 1e10
+    if SCFfail: return 1e12*np.ones_like(p).flatten()
     deltaG = gap - gap_ref
     L = deltaG * deltaG
     dL_dp = agrad(L, p, retain_graph=True)[0]

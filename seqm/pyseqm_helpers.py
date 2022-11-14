@@ -1,7 +1,7 @@
 import torch
 import numpy as np
 from inspect import getfullargspec
-from scipy.optimize import approx_fprime
+from scipy.optimize import approx_fprime, Bounds
 from ase.data import atomic_numbers
 from seqm.basics import Energy
 from seqm.seqm_functions.parameters import params
@@ -103,6 +103,8 @@ default_bounds = {
 }
 
 
+
+
 class pyseqm_orderator:
     """
     Class to handle inputs and output of pyseqm calculation.
@@ -202,6 +204,28 @@ def get_default_parameters(species, method, parameter_dir, param_list):
                        parameters=param_list).to(device)
     default_p = default_p[species][0].transpose(0,1).contiguous()
     return default_p
+    
+def get_par_names_bounds_defaults(species, method, parameter_dir, exclude_allzero=True):
+    """
+    Returns all parameter names and corresponding default bounds and values.
+    If exclude_allzero: remove entries that are zero for all elements
+        (These should be irrelevant for this system and will only 
+         complicate optimization, for instance.)
+    """
+    all_pnames = [par for par in default_bounds[method].keys()]
+    all_pdefaults = get_default_parameters(species, method, parameter_dir, all_pnames)
+    if exclude_allzero:
+        pmask = torch.all(torch.abs(all_pdefaults)<1e-8, axis=1)
+        zero_rows = np.argwhere(pmask)
+        all_pnames = np.delete(all_pnames, zero_rows, axis=0)
+        all_pdefaults = np.delete(all_pdefaults, zero_rows, axis=0)
+    nA = species.size()[-1]
+    pbounds = [default_bounds[method][par] for par in all_pnames]
+    bounds_expanded = np.array([[b,]*nA for b in pbounds]).T
+    lower = bounds_expanded[0].T.flatten()
+    upper = bounds_expanded[1].T.flatten()
+    all_pbounds = Bounds(lower, upper)
+    return tuple(all_pnames), all_pbounds, all_pdefaults
     
 
 def get_ordered_args(func, **kwargs):

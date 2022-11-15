@@ -69,7 +69,7 @@ def run_calculation(p, calculator=None, coordinates=None,
     p.requires_grad_(True)
     learnedpar = {pname:p[i] for i, pname in enumerate(custom_params)}
     
-    try:  # calculation might fail for given choice of parameters
+    try:  # calculation might fail for random choice of parameters
         res = calculator(const, coordinates, species, learnedpar, all_terms=True)
         parser = Parser(calculator.seqm_parameters)
         n_occ = parser(const, species, coordinates)[4]
@@ -115,7 +115,7 @@ def energy_loss(p, popt_list=[], calculator=None, coordinates=None,
                                           species=species,
                                           custom_params=popt_list)
     E, SCFfail = res[1], res[-1]
-    if SCFfail: return 1e12
+    if SCFfail: return np.inf
     deltaE = E.sum() - Eref
     L = deltaE*deltaE / species.shape[0]
     return L.detach().numpy()
@@ -131,7 +131,7 @@ def energy_loss_jac(p, popt_list=[], calculator=None, coordinates=None,
                                           species=species,
                                           custom_params=popt_list)
     E, SCFfail = res[1], res[-1]
-    if SCFfail: return 1e12*np.ones_like(p).flatten()
+    if SCFfail: return np.inf*np.sign(p).flatten()
     deltaE = E.sum() - Eref
     dE_dp = agrad(E, p, retain_graph=True)[0]
     dE_dp = dE_dp.flatten()
@@ -169,14 +169,14 @@ def forces_loss(p, popt_list=[], calculator=None, coordinates=None,
                                           species=species,
                                           custom_params=popt_list)
     E, SCFfail = res[1], res[-1]
-    if SCFfail: return 1e12
+    if SCFfail: return np.inf
     F = -agrad(E, coordinates)[0][0]
     F = F - torch.sum(F, dim=0)  # remove COM force
     L = torch.square(F - Fref).sum() / species.shape[0]
     return L.detach().numpy()
     
 def forces_loss_jac(p, popt_list=[], calculator=None,coordinates=None,
-                   species=None, Fref=0., *args, **kwargs):
+                    species=None, Fref=0., *args, **kwargs):
     """
     Gradient of square loss of forces per atom
     
@@ -196,7 +196,7 @@ def forces_loss_jac(p, popt_list=[], calculator=None,coordinates=None,
                                           species=species,
                                           custom_params=popt_list)
     E, SCFfail = res[1], res[-1]
-    if SCFfail: return 1e12*np.ones_like(p).flatten()
+    if SCFfail: return np.inf*np.sign(p).flatten()
     F = -agrad(E, coordinates, create_graph=True)[0][0]
     F = F - torch.sum(F, dim=0)  # remove COM force
     L = torch.square(F - Fref).sum() / species.shape[0]
@@ -244,7 +244,7 @@ def gap_loss(p, popt_list=[], calculator=None, coordinates=None,
                                           species=species,
                                           custom_params=popt_list)
     gap, SCFfail = res[9], res[-1]
-    if SCFfail: return 1e12
+    if SCFfail: return np.inf
     deltaG = gap - gap_ref
     L = deltaG * deltaG
     return L.detach().numpy()
@@ -278,7 +278,7 @@ def gap_loss_jac(p, popt_list=[], calculator=None, coordinates=None,
                                           species=species,
                                           custom_params=popt_list)
     gap, SCFfail = res[9], res[-1]
-    if SCFfail: return 1e12*np.ones_like(p).flatten()
+    if SCFfail: return np.inf*np.sign(p).flatten()
     deltaG = gap - gap_ref
     L = deltaG * deltaG
     dL_dp = agrad(L, p, retain_graph=True)[0]
@@ -289,6 +289,7 @@ class LossConstructor:
     def __init__(self, **kwargs):
         self.L = 0.
         self.include = []
+        self.implemented_properties = ['energy','forces','gap']
         req = ['popt_list', 'calculator', 'coordinates', 'species']
         if any(required not in kwargs for required in req):
             msg = "Please specify'"+"', '".join(req)+"' as kwargs!"
@@ -317,13 +318,20 @@ class LossConstructor:
             exec('self.'+prop+'_loss_grad = dLdp_i')
             L += eval('self.weight_'+prop+' * L_i')
             dLdp += eval('self.weight_'+prop+' * dLdp_i')
-        print(dLdp.reshape((3,-1)))
         clear_results_cache()
         return (L, dLdp)
     
     def add_loss(self, prop, weight=1., **kwargs):
-        if prop not in ['energy','forces','gap']:
-            raise ValueError()
+        """
+        Add individual loss evaluators as defined above to loss function.
+        If implementing a new property, please add loss functon
+        `<property>_loss(...)` above and update self.implemented_properties
+        """
+        if prop not in self.implemented_properties:
+            msg  = "Only '"+"', '".join(self.implemented_properties)
+            msg += "' implemented for loss. Check for typos or write "
+            msg += "coresponding loss function for '"+prop+"'."
+            raise ValueError(msg)
         self.include.append(prop)
         exec('self.weight_'+prop+' = weight')
         kwargs.update(self.general_kwargs)

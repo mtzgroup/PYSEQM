@@ -1,7 +1,7 @@
 import torch
 import numpy as np
 from inspect import getfullargspec
-from scipy.optimize import approx_fprime, Bounds
+from scipy.optimize import approx_fprime, LinearConstraint, Bounds
 from ase.data import atomic_numbers
 from seqm.basics import Energy
 from seqm.seqm_functions.parameters import params
@@ -27,82 +27,72 @@ default_settings = {
     'Hf_flag'            : False,
    }
 
-default_bounds = {
-  'AM1': {
-    'U_ss'       : [-640.,   0.], 
-    'U_pp'       : [-640.,   0.], 
-    'zeta_s'     : [   0.,  64.], 
-    'zeta_p'     : [   0.,  42.], 
-    'zeta_d'     : [   0.,  42.],
-    'beta_s'     : [-420.,   0.], 
-    'beta_p'     : [-420.,   0.], 
-    'g_ss'       : [   0., 420.], 
-    'g_sp'       : [   0., 240.], 
-    'g_pp'       : [   0., 240.], 
-    'g_p2'       : [   0., 240.], 
-    'h_sp'       : [   0.,  64.], 
-    'alpha'      : [   0.,  64.], 
-    'Gaussian1_K': [ -16.,  16.], 
-    'Gaussian1_L': [   0.,  96.], 
-    'Gaussian1_M': [   0.,  64.], 
-    'Gaussian2_K': [ -16.,  16.], 
-    'Gaussian2_L': [   0., 128.], 
-    'Gaussian2_M': [   0.,  64.], 
-    'Gaussian3_K': [  -8.,  16.], 
-    'Gaussian3_L': [   0., 128.], 
-    'Gaussian3_M': [   0.,  64.], 
-    'Gaussian4_K': [  -8.,   8.], 
-    'Gaussian4_L': [ -16.,  96.], 
-    'Gaussian4_M': [ -16.,  72.],
-  },
-  'PM3': {
-    'U_ss'       : [-640.,   0.],
-    'U_pp'       : [-640.,   0.],
-    'U_dd'       : [-640.,   0.],
-    'zeta_s'     : [   0.,  64.],
-    'zeta_p'     : [   0.,  42.],
-    'zeta_d'     : [   0.,  42.],
-    'beta_s'     : [-420.,   0.],
-    'beta_p'     : [-420.,   0.],
-    'g_ss'       : [   0., 420.],
-    'g_sp'       : [   0., 240.],
-    'g_pp'       : [   0., 240.],
-    'g_p2'       : [   0., 240.],
-    'h_sp'       : [   0.,  64.],
-    'alpha'      : [   0.,  64.],
-    'Gaussian1_K': [ -16.,  16.],
-    'Gaussian1_L': [   0.,  96.],
-    'Gaussian1_M': [   0.,  64.],
-    'Gaussian2_K': [ -16.,  16.],
-    'Gaussian2_L': [   0., 128.],
-    'Gaussian2_M': [   0.,  64.],
-    'Gaussian3_K': [  -8.,  16.],
-    'Gaussian3_L': [   0., 128.],
-    'Gaussian3_M': [   0.,  64.],
-    'Gaussian4_K': [  -8.,   8.],
-    'Gaussian4_L': [ -16.,  96.],
-    'Gaussian4_M': [ -16.,  72.],
-  },
-  'MNDO': {
-    'U_ss'       : [-640.,   0.],
-    'U_pp'       : [-640.,   0.],
-    'U_dd'       : [-640.,   0.],
-    'zeta_s'     : [   0.,  42.],
-    'zeta_p'     : [   0.,  42.],
-    'zeta_d'     : [   0.,  42.],
-    'beta_s'     : [-420.,   0.],
-    'beta_p'     : [-420.,   0.],
-    'g_ss'       : [   0., 240.],
-    'g_sp'       : [   0., 240.],
-    'g_pp'       : [   0., 240.],
-    'g_p2'       : [   0., 240.],
-    'h_sp'       : [   0.,  64.],
-    'alpha'      : [   0.,  64.],
-    'polvom'     : [   0.,  64.],
-  },
+default_multi_bound = {
+    'U_ss'       : [  0.0,  5.0], 
+    'U_pp'       : [  0.0,  5.0], 
+    'U_dd'       : [  0.0,  5.0],
+    'zeta_s'     : [  0.5,  5.0], 
+    'zeta_p'     : [  0.5,  5.0], 
+    'zeta_d'     : [  0.5,  5.0],
+    'beta_s'     : [  0.0,  5.0], 
+    'beta_p'     : [  0.0,  5.0], 
+    'beta_d'     : [  0.0,  5.0],
+    'g_ss'       : [  0.0,  5.0], 
+    'g_sp'       : [  0.0,  5.0], 
+    'g_pp'       : [  0.0,  5.0], 
+    'g_p2'       : [  0.0,  5.0], 
+    'h_sp'       : [  0.0, 20.0], 
+    'alpha'      : [  0.0, 10.0], 
+    'Gaussian1_K': [-10.0, 10.0], 
+    'Gaussian1_L': [  0.0, 10.0], 
+    'Gaussian1_M': [  0.0, 20.0], 
+    'Gaussian2_K': [-10.0, 10.0], 
+    'Gaussian2_L': [  0.0, 20.0], 
+    'Gaussian2_M': [  0.0, 20.0], 
+    'Gaussian3_K': [-20.0, 20.0], 
+    'Gaussian3_L': [  0.0, 10.0], 
+    'Gaussian3_M': [  0.0, 20.0], 
+    'Gaussian4_K': [-40.0, 40.0], 
+    'Gaussian4_L': [  0.0, 20.0], 
+    'Gaussian4_M': [  0.0, 20.0],
 }
 
+parameter_names = {
+  'AM1': ['U_ss', 'U_pp', 'zeta_s', 'zeta_p', 'zeta_d', 'beta_s',
+          'beta_p', 'g_ss', 'g_sp', 'g_pp', 'g_p2', 'h_sp', 'alpha',
+          'Gaussian1_K', 'Gaussian1_L', 'Gaussian1_M',
+          'Gaussian2_K', 'Gaussian2_L', 'Gaussian2_M',
+          'Gaussian3_K', 'Gaussian3_L', 'Gaussian3_M',
+          'Gaussian4_K', 'Gaussian4_L', 'Gaussian4_M'],
+  'PM3': ['U_ss', 'U_pp', 'U_dd', 'zeta_s', 'zeta_p', 'zeta_d', 'beta_s',
+          'beta_p', 'g_ss', 'g_sp', 'g_pp', 'g_p2', 'h_sp', 'alpha',
+          'Gaussian1_K', 'Gaussian1_L', 'Gaussian1_M',
+          'Gaussian2_K', 'Gaussian2_L', 'Gaussian2_M'],
+  'MNDO': ['U_ss', 'U_pp', 'U_dd', 'zeta_s', 'zeta_p', 'zeta_d', 'beta_s',
+           'beta_p', 'g_ss', 'g_sp', 'g_pp', 'g_p2', 'h_sp', 'alpha',
+           'polvom']
+}
 
+max_defaults = {
+  'AM1': {'U_ss':-136.11, 'U_pp':-104.89, 'zeta_s':3.77, 'zeta_p':2.52, 
+          'zeta_d':1.0, 'beta_s':-69.59, 'beta_p':-29.27, 'g_ss':59.42, 
+          'g_sp':17.25, 'g_pp':16.71, 'g_p2':14.91, 'h_sp':4.83, 
+          'alpha':6.02, 'Gaussian1_K':1.75, 'Gaussian1_L':12.39, 
+          'Gaussian1_M':2.05, 'Gaussian2_K':0.9, 'Gaussian2_L':10.79, 
+          'Gaussian2_M':3.2, 'Gaussian3_K':0.04, 'Gaussian3_L':13.56, 
+          'Gaussian3_M':3.01, 'Gaussian4_K':-0.01, 'Gaussian4_L':5.0, 
+          'Gaussian4_M':2.65},
+  'PM3': {'U_ss':-116.62, 'U_pp':-105.69, 'U_dd':-100.0, 'zeta_s':7.0, 
+          'zeta_p':2.5, 'zeta_d':2.88, 'beta_s':-48.41, 'beta_p':-27.75, 
+          'g_ss':16.01, 'g_sp':16.07, 'g_pp':14.82, 'g_p2':16.0, 
+          'h_sp':4.04, 'alpha':3.36, 'Gaussian1_K':3.0, 'Gaussian1_L':6.5, 
+          'Gaussian1_M':2.32, 'Gaussian2_K':-2.55, 'Gaussian2_L':6.5, 
+          'Gaussian2_M':2.97},
+  'MNDO': {'U_ss':-131.07, 'U_pp':-105.78, 'U_dd':-100.0, 'zeta_s':4.0, 
+           'zeta_p':2.85, 'zeta_d':1.0, 'beta_s':-48.29, 'beta_p':-36.51, 
+           'g_ss':16.92, 'g_sp':17.25, 'g_pp':16.71, 'g_p2':14.91, 
+           'h_sp':4.83, 'alpha':3.42, 'polvom':4.09}
+}
 
 
 class pyseqm_orderator:
@@ -205,27 +195,36 @@ def get_default_parameters(species, method, parameter_dir, param_list):
     default_p = default_p[species][0].transpose(0,1).contiguous()
     return default_p
     
-def get_par_names_bounds_defaults(species, method, parameter_dir, exclude_allzero=True):
+def get_par_names_bounds_defaults(species, method, parameter_dir, change_zeros=False):
     """
     Returns all parameter names and corresponding default bounds and values.
-    If exclude_allzero: remove entries that are zero for all elements
-        (These should be irrelevant for this system and will only 
-         complicate optimization, for instance.)
+        Bounds are given by multiple of default value
+    If change_zeros: Extend bounds for entries that have 0. as default value
+        (These should be irrelevant for the system and might only complicate,
+         for example, optimization, but becomes relevant when extending the
+         default parametrization.)
     """
-    all_pnames = [par for par in default_bounds[method].keys()]
-    all_pdefaults = get_default_parameters(species, method, parameter_dir, all_pnames)
-    if exclude_allzero:
-        pmask = torch.all(torch.abs(all_pdefaults)<1e-8, axis=1)
-        zero_rows = np.argwhere(pmask)
-        all_pnames = np.delete(all_pnames, zero_rows, axis=0)
-        all_pdefaults = np.delete(all_pdefaults, zero_rows, axis=0)
+    pnames = parameter_names[method]
     nA = species.size()[-1]
-    pbounds = [default_bounds[method][par] for par in all_pnames]
-    bounds_expanded = np.array([[b,]*nA for b in pbounds]).T
-    lower = bounds_expanded[0].T.flatten()
-    upper = bounds_expanded[1].T.flatten()
-    all_pbounds = Bounds(lower, upper)
-    return tuple(all_pnames), all_pbounds, all_pdefaults
+    bounds = [default_multi_bound[par] for par in pnames]
+    bounds_expanded = np.array([[b,]*nA for b in bounds]).T
+    lowupp = np.array([bounds_expanded[0].T.flatten(),
+                       bounds_expanded[1].T.flatten()])
+    pdef = get_default_parameters(species, method, parameter_dir, pnames)
+    def4b = pdef.clone().detach().numpy()
+    def4c = def4b.copy().flatten()
+    zero_idx = np.argwhere(np.abs(def4b)<1e-8)
+    for ij in zero_idx:
+        def4b[tuple(ij)] = max_defaults[method][pnames[ij[0]]]
+    def4b = def4b.flatten()
+    low_b, upp_b = np.sort(lowupp * def4b, axis=0)
+    low_b = np.minimum(low_b, def4c)
+    upp_b = np.maximum(upp_b, def4c)
+    pbounds = Bounds(low_b, upp_b)
+    if change_zeros: def4c = def4b
+    low_c, upp_c = np.sort(lowupp * def4c, axis=0)
+    pconstr = LinearConstraint(np.eye(low_c.size), low_c, upp_c)
+    return tuple(pnames), pdef, pbounds, pconstr
     
 
 def get_ordered_args(func, **kwargs):

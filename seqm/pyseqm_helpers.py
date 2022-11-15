@@ -195,14 +195,27 @@ def get_default_parameters(species, method, parameter_dir, param_list):
     default_p = default_p[species][0].transpose(0,1).contiguous()
     return default_p
     
-def get_par_names_bounds_defaults(species, method, parameter_dir, change_zeros=False):
+def get_par_names_bounds_defaults(species, method, parameter_dir, 
+                                  change_zeros=False):
     """
-    Returns all parameter names and corresponding default bounds and values.
-        Bounds are given by multiple of default value
+    Returns all parameter names, corresponding default values, standard 
+    bounds (spanning wide space), constraints (physically-reasonable space).
+        Bounds are given as multiples of default values
     If change_zeros: Extend bounds for entries that have 0. as default value
         (These should be irrelevant for the system and might only complicate,
          for example, optimization, but becomes relevant when extending the
          default parametrization.)
+    
+    Parameters:
+    -----------
+    species : torch.Tensor / array-like, shape (nAtoms,)
+        atomic numbers
+    method : str
+        type of NDDO calculation to perform [AM1, PM3, MNDO]
+    parameter_dir : str
+        path to directory with default parameters
+    change_zeros : bool (default False)
+        whether or not to change parameters with zero default value
     """
     pnames = parameter_names[method]
     nA = species.size()[-1]
@@ -214,6 +227,9 @@ def get_par_names_bounds_defaults(species, method, parameter_dir, change_zeros=F
     def4b = pdef.clone().detach().numpy()
     def4c = def4b.copy().flatten()
     zero_idx = np.argwhere(np.abs(def4b)<1e-8)
+    ## bounds in some optimizers cannot be equal (fixed parameter)
+    ## as this causes problem in mapping parameter to [0;1)
+    ## we use placeholder bounds and introduce constraints to fix values
     for ij in zero_idx:
         def4b[tuple(ij)] = max_defaults[method][pnames[ij[0]]]
     def4b = def4b.flatten()

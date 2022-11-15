@@ -321,6 +321,17 @@ class LossConstructor:
         clear_results_cache()
         return (L, dLdp)
     
+    def jac(self, p, *args, **kwargs):
+        p = torch.as_tensor(p, device=device)
+        dLdp = np.zeros_like(p)
+        clear_results_cache()
+        for prop in self.include:
+            dLdp_i = eval(prop+'_loss_jac(p, *self.'+prop+'_args)')
+            exec('self.'+prop+'_loss_grad = dLdp_i')
+            dLdp += eval('self.weight_'+prop+' * dLdp_i')
+        clear_results_cache()
+        return dLdp
+    
     def add_loss(self, prop, weight=1., **kwargs):
         """
         Add individual loss evaluators as defined above to loss function.

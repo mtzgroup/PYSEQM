@@ -551,7 +551,6 @@ class SCF(torch.autograd.Function):
                               maskd, mask, idxi, idxj, eps, notconverged, \
                               atom_molid, pair_molid)
         #
-
         return P, notconverged
 
     @staticmethod

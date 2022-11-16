@@ -90,3 +90,4 @@ f.write("#index, par, energy (eV), grad\n")
 for i in range(N):
     f.write("%d %12.8e %12.8e %12.8e\n" % (i,t[i],Etot[i],tg[i] ))
 f.close()
+

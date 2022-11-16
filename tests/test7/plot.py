@@ -22,12 +22,14 @@ plt.plot(x1,f1,'g--', label='numerical diff')
 plt.legend()
 plt.ylabel('Gradient')
 #plt.xlim([0.0,10])
+plt.savefig('dEdp_test0.pdf')
 
 plt.figure(1)
 df = d[1:-1,3]-f1
 plt.plot(x1[:],df[:])
 plt.ylabel('Gradient Different')
 #plt.xlim([0.0,10])
+plt.savefig('dEdp_test1.pdf')
 
 
 plt.figure(2)
@@ -35,4 +37,5 @@ plt.plot(d[:,1], d[:,2])
 plt.ylabel('Energy (eV)')
 #plt.xlim([0.0,10])
 
-plt.show()
+#plt.show()
+plt.savefig('dEdp_test2.pdf')

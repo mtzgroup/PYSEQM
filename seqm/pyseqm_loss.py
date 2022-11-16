@@ -131,7 +131,9 @@ def energy_loss_jac(p, popt_list=[], calculator=None, coordinates=None,
                                           species=species,
                                           custom_params=popt_list)
     E, SCFfail = res[1], res[-1]
-    if SCFfail: return np.inf*np.sign(p).flatten()
+    if SCFfail:
+        dummy = p.clone().detach()
+        return np.inf*np.sign(dummy).flatten()
     deltaE = E.sum() - Eref
     dE_dp = agrad(E, p, retain_graph=True)[0]
     dE_dp = dE_dp.flatten()
@@ -190,17 +192,20 @@ def forces_loss_jac(p, popt_list=[], calculator=None,coordinates=None,
     #(THE PROBLEM APPEARS TO BE IN d^2E / dRdp, ALMOST CERTAINLY BECAUSE
     # OF LACK OR INSTABILITY IN BACKPROP THROUGH THE SCF CYCLE!)
     """
+    Fref = torch.as_tensor(Fref, device=device)
     p, coordinates, res = run_calculation(p,
                                           calculator=calculator,
                                           coordinates=coordinates,
                                           species=species,
                                           custom_params=popt_list)
     E, SCFfail = res[1], res[-1]
-    if SCFfail: return np.inf*np.sign(p).flatten()
+    if SCFfail:
+        dummy = p.clone().detach()
+        return np.inf*np.sign(dummy).flatten()
     F = -agrad(E, coordinates, create_graph=True)[0][0]
     F = F - torch.sum(F, dim=0)  # remove COM force
-    L = torch.square(F - Fref).sum() / species.shape[0]
-    dL_dp = agrad(L, p, retain_graph=True)[0]
+    L = torch.square(F - Fref).sum()
+    dL_dp = agrad(L, p, retain_graph=True)[0] / species.shape[0]
     return dL_dp.detach().numpy().flatten()
 #    deltaE = E.sum() - Eref
 #    dE_dp = agrad(E, p, create_graph=True)[0]
@@ -278,7 +283,9 @@ def gap_loss_jac(p, popt_list=[], calculator=None, coordinates=None,
                                           species=species,
                                           custom_params=popt_list)
     gap, SCFfail = res[9], res[-1]
-    if SCFfail: return np.inf*np.sign(p).flatten()
+    if SCFfail:
+        dummy = p.clone().detach()
+        return np.inf*np.sign(dummy).flatten()
     deltaG = gap - gap_ref
     L = deltaG * deltaG
     dL_dp = agrad(L, p, retain_graph=True)[0]
@@ -287,7 +294,6 @@ def gap_loss_jac(p, popt_list=[], calculator=None, coordinates=None,
 
 class LossConstructor:
     def __init__(self, **kwargs):
-        self.L = 0.
         self.include = []
         self.implemented_properties = ['energy','forces','gap']
         req = ['popt_list', 'calculator', 'coordinates', 'species']
@@ -298,39 +304,39 @@ class LossConstructor:
     
     def __call__(self, p, *args, **kwargs):
         p = torch.as_tensor(p, device=device)
-        L = 0.
+        self.L = 0.
         clear_results_cache()
         for prop in self.include:
             L_i = eval(prop+'_loss(p, *self.'+prop+'_args)')
             exec('self.'+prop+'_loss_val = L_i')
-            L += eval('self.weight_'+prop+' * L_i')
+            self.L += eval('self.weight_'+prop+' * L_i')
         clear_results_cache()
-        return L
+        return self.L
     
     def loss_and_jac(self, p, *args, **kwargs):
         p = torch.as_tensor(p, device=device)
-        L, dLdp = 0., np.zeros_like(p)
+        self.L, self.dLdp = 0., np.zeros_like(p)
         clear_results_cache()
         for prop in self.include:
             L_i = eval(prop+'_loss(p, *self.'+prop+'_args)')
             dLdp_i = eval(prop+'_loss_jac(p, *self.'+prop+'_args)')
             exec('self.'+prop+'_loss_val = L_i')
             exec('self.'+prop+'_loss_grad = dLdp_i')
-            L += eval('self.weight_'+prop+' * L_i')
-            dLdp += eval('self.weight_'+prop+' * dLdp_i')
+            self.L += eval('self.weight_'+prop+' * L_i')
+            self.dLdp += eval('self.weight_'+prop+' * dLdp_i')
         clear_results_cache()
-        return (L, dLdp)
+        return (self.L, self.dLdp)
     
     def jac(self, p, *args, **kwargs):
         p = torch.as_tensor(p, device=device)
-        dLdp = np.zeros_like(p)
+        self.dLdp = np.zeros_like(p)
         clear_results_cache()
         for prop in self.include:
             dLdp_i = eval(prop+'_loss_jac(p, *self.'+prop+'_args)')
             exec('self.'+prop+'_loss_grad = dLdp_i')
-            dLdp += eval('self.weight_'+prop+' * dLdp_i')
+            self.dLdp += eval('self.weight_'+prop+' * dLdp_i')
         clear_results_cache()
-        return dLdp
+        return self.dLdp
     
     def add_loss(self, prop, weight=1., **kwargs):
         """
@@ -348,6 +354,17 @@ class LossConstructor:
         kwargs.update(self.general_kwargs)
         exec('self.'+prop+'_args = get_ordered_args('+prop+'_loss, **kwargs)')
         
+    def get_loss(self):
+        """ Return current loss """
+        if not hasattr(self, 'L'): raise ValueError("Loss not calculated yet")
+        return self.L
+    
+    def get_loss_jac(self):
+        """ return gradient of current loss """
+        if not hasattr(self, 'dLdp'):
+            raise ValueError("Loss gradient not calculated yet")
+        return self.dLdp
+    
     def get_individual_loss(self, prop, include_weight=False):
         """
         Return SQUARED loss of property as included in total loss function
@@ -370,4 +387,24 @@ class LossConstructor:
             if np.size(out) == 1: out = float(out)
         return out
         
-
+    def get_individual_loss_jac(self, prop, include_weight=False):
+        """
+        Return gradient of squared loss of property
+        
+        Parameters:
+        -----------
+        prop : str
+            property to return loss value for ('energy', 'forces', ...)
+        include_weight : bool (optional, default: False)
+            Whether or not to scale squared loss with corresponding weight
+            (i.e., as it enters the total loss gradient)
+        """
+        if not hasattr(self, prop+'_loss_grad'):
+            raise ValueError("Loss gradient for property '"+prop+"' not available.")
+        if include_weight:
+            out = eval('self.'+prop+'_loss_grad * self.weight_'+prop)
+        else:
+            out = eval('self.'+prop+'_loss_grad')
+        if type(out) in [np.ndarray, list]:
+            if np.size(out) == 1: out = float(out)
+        return out

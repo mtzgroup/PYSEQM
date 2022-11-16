@@ -70,6 +70,7 @@ def run_calculation(p, calculator=None, coordinates=None,
     learnedpar = {pname:p[i] for i, pname in enumerate(custom_params)}
     
     try:  # calculation might fail for random choice of parameters
+            # Eat, E, Eel, Enuc, Eiso, EnucAB, orb_eigs, P, q, gap, fail
         res = calculator(const, coordinates, species, learnedpar, all_terms=True)
         parser = Parser(calculator.seqm_parameters)
         n_occ = parser(const, species, coordinates)[4]
@@ -141,6 +142,60 @@ def energy_loss_jac(p, popt_list=[], calculator=None, coordinates=None,
     return 2.0 * dL_dp.detach().numpy()
     
 
+def atomization_loss(p, popt_list=[], calculator=None, coordinates=None,
+                     species=None, Eref=0.):
+    """
+    Returns squared loss in atomization energy per atom
+    
+    Parameters:
+    -----------
+    p : torch.Tensor, shape (#custom parameters,)
+        Custom parameters in the format
+            ([[first custom parameter for all atoms],
+              [second custom parameter for all atoms],
+              ..., ]).flatten()
+    popt_list : tuple, len #custom parameters / nAtoms
+        names of custom parameters, e.g., ['g_ss', 'zeta_s']
+    calculator : pyseqm.basics.Energy object
+        SE-QC calculator instance for system
+    coordinates : torch.Tensor, shape (nAtoms, 3)
+        atomic positions in Ang
+    species : torch.Tensor, shape (nAtoms,)
+        atomic numbers in system
+    Eref : float or torch.Tensor(float), shape ()
+        reference atomization energy of system in eV
+    """
+    p, coordinates, res = run_calculation(p,
+                                          calculator=calculator,
+                                          coordinates=coordinates,
+                                          species=species,
+                                          custom_params=popt_list)
+    Eat, SCFfail = res[0], res[-1]
+    if SCFfail: return np.inf
+    deltaE = Eat.sum() - Eref
+    L = deltaE*deltaE / species.shape[0]
+    return L.detach().numpy()
+
+def atomization_loss_jac(p, popt_list=[], calculator=None, coordinates=None,
+                         species=None, Eref=0.):
+    """
+    Gradient of square loss in atomization energy per atom
+    """
+    p, coordinates, res = run_calculation(p,
+                                          calculator=calculator,
+                                          coordinates=coordinates,
+                                          species=species,
+                                          custom_params=popt_list)
+    Eat, SCFfail = res[0], res[-1]
+    if SCFfail:
+        dummy = p.clone().detach()
+        return np.inf*np.sign(dummy).flatten()
+    deltaE = Eat.sum() - Eref
+    dE_dp = agrad(E, p, retain_graph=True)[0]
+    dE_dp = dE_dp.flatten()
+    dL_dp = deltaE * dE_dp / species.shape[0]
+    return 2.0 * dL_dp.detach().numpy()
+    
 def forces_loss(p, popt_list=[], calculator=None, coordinates=None,
                 species=None, Fref=None):
     """
@@ -295,7 +350,8 @@ def gap_loss_jac(p, popt_list=[], calculator=None, coordinates=None,
 class LossConstructor:
     def __init__(self, **kwargs):
         self.include = []
-        self.implemented_properties = ['energy','forces','gap']
+        self.implemented_properties = ['energy', 'forces', 'gap',
+                                       'atomization']
         req = ['popt_list', 'calculator', 'coordinates', 'species']
         if any(required not in kwargs for required in req):
             msg = "Please specify'"+"', '".join(req)+"' as kwargs!"

@@ -332,7 +332,8 @@ def gap_loss_jac(p, popt_list=[], calculator=None, coordinates=None,
     gap_ref : float or torch.Tensor, shape ()
         reference HOMO-LUMO gap in eV
     """
-    p, coordinates, res = run_calculation(p,
+    with torch.autograd.set_detect_anomaly(True):
+        p, coordinates, res = run_calculation(p,
                                           calculator=calculator,
                                           coordinates=coordinates,
                                           species=species,
@@ -343,7 +344,8 @@ def gap_loss_jac(p, popt_list=[], calculator=None, coordinates=None,
         return np.inf*np.sign(dummy).flatten()
     deltaG = gap - gap_ref
     L = deltaG * deltaG
-    dL_dp = agrad(L, p, retain_graph=True)[0]
+    with torch.autograd.set_detect_anomaly(True):
+        dL_dp = agrad(L, p, retain_graph=True)[0]
     return dL_dp.detach().numpy().flatten()
     
 

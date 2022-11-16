@@ -91,8 +91,6 @@ with torch.autograd.set_detect_anomaly(True):
     eng = Energy(seqm_parameters).to(device)
     Hf, Etot, Eelec, Enuc, Eiso, EnucAB, e, P, charge, notconverged = eng(const, coordinates, species, learned_parameters=learnedpar, all_terms=True)
     #L=Etot.sum()
-    print(repr(e[0][homo]))
-    print(repr(e[0][lumo]))
     L=e[:,orb].sum() # HOMO
     L.backward()
 

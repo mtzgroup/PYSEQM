@@ -257,7 +257,7 @@ def get_ordered_args(func, **kwargs):
     
     Returns:
     --------
-    ordered list of input for positional args of `func`
+    ordered tuple of input for positional args of `func`
     """
     argspec = getfullargspec(func)
     func_defaults = argspec.defaults

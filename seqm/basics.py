@@ -267,6 +267,11 @@ class Energy(torch.nn.Module):
         # Hf_flag: true return Hf, false return Etot-Eiso
 
 
+    def __eq__(self, other):
+        if self.__class__ != other.__class__: return False
+        return self.__dict__ == other.__dict__
+        
+    
     def forward(self, const, coordinates, species, learned_parameters=dict(), all_terms=False, P0=None, step=0, *args, **kwargs):
         """
         get the energy terms
@@ -358,6 +363,11 @@ class Force(torch.nn.Module):
         self.seqm_parameters = seqm_parameters
 
 
+    def __eq__(self, other):
+        if self.__class__ != other.__class__: return False
+        return self.__dict__ == other.__dict__
+        
+    
     def forward(self, const, coordinates, species, learned_parameters=dict(), P0=None, step=0, mode=None, *args, **kwargs):
         coordinates.requires_grad_(True)
         Hf, Etot, Eelec, Enuc, Eiso, EnucAB, e, P, charge, notconverged = \

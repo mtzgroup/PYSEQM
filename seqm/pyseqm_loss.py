@@ -1,12 +1,12 @@
 import numpy as np
 import torch
-from functools import lru_cache
+#from functools import lru_cache
 from torch.autograd import grad as agrad
 from seqm.basics import Parser
 from seqm.seqm_functions.constants import Constants
 from seqm.pyseqm_helpers import get_ordered_args
 
-MAX_CACHE_SIZE=0
+#MAX_CACHE_SIZE=16
 
 
 torch.set_default_dtype(torch.float64)
@@ -121,7 +121,7 @@ class PyseqmContainer:
         self.seqm_result = None
     
 
-@lru_cache(maxsize=MAX_CACHE_SIZE)
+#@lru_cache(maxsize=MAX_CACHE_SIZE)
 def run_calculation(p, calculator=None, coordinates=None,
                     species=None, custom_params=()):
     """
@@ -192,7 +192,7 @@ def run_calculation(p, calculator=None, coordinates=None,
         res[-1] = True
     return p, coordinates, res
     
-def clear_results_cache(): run_calculation.cache_clear()
+#def clear_results_cache(): run_calculation.cache_clear()
 
 
 def energy_loss(p, popt_list=[], calculator=None, coordinates=None,

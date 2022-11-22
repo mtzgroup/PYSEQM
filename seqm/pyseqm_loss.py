@@ -1,17 +1,22 @@
 import numpy as np
 import torch
-#from functools import lru_cache
+from functools import lru_cache
 from torch.autograd import grad as agrad
-from seqm.basics import Parser
+from seqm.basics import Parser, Energy
 from seqm.seqm_functions.constants import Constants
 from seqm.pyseqm_helpers import get_ordered_args
 
-#MAX_CACHE_SIZE=16
+MAX_CACHE_SIZE=16
 
 
 torch.set_default_dtype(torch.float64)
 has_cuda = torch.cuda.is_available()
-device = torch.device('cuda') if has_cuda else torch.device('cpu')
+if has_cuda:
+    device = torch.device('cuda')
+    sp2_def = [True, 1e-5]
+else:
+    device = torch.device('cpu')
+    sp2_def = [False]
 
 
 class PyseqmContainer:
@@ -44,7 +49,7 @@ class PyseqmContainer:
         """
         Returns total energy of SEQC calculation with custom parameters.
         
-        Parameters (when using lru_cache, all inputs must be hashable!)
+        Parameters
         ----------
         prop : str
             one of atomization_energy, scf_energy, electronic_energy, 
@@ -121,9 +126,9 @@ class PyseqmContainer:
         self.seqm_result = None
     
 
-#@lru_cache(maxsize=MAX_CACHE_SIZE)
-def run_calculation(p, calculator=None, coordinates=None,
-                    species=None, custom_params=()):
+@lru_cache(maxsize=MAX_CACHE_SIZE)
+def run_calculation(p, coordinates=None, species=None, custom_params=(),
+                    setting_keys=(), setting_vals=()):
     """
     Returns total energy of SEQC calculation with custom parameters.
     
@@ -131,12 +136,14 @@ def run_calculation(p, calculator=None, coordinates=None,
     ----------
     p : torch.Tensor, shape (#custom parameters,)
         custom parameters
-    calculator : pyseqm Energy calculator object
-        list of names of custom parameters as used in parameter file
     coordinates : Tensor, shape (nAtoms, 3)
         atomic positions in Angstrom
     species : Tensor, shape (nAtoms,)
         atomic numbers in descending order (coordinates accordingly)
+    setting_keys : tuple
+        keyword options for seqm Energy calculator
+    setting_vals : tuple
+        values corresponding to keyword options of seqm Energy calculator
     custom_params : tuple
         names of custom parameters defined in p
     
@@ -177,7 +184,9 @@ def run_calculation(p, calculator=None, coordinates=None,
     coordinates.requires_grad_(True)
     p.requires_grad_(True)
     learnedpar = {pname:p[i] for i, pname in enumerate(custom_params)}
-
+    settings = dict(zip(setting_keys, setting_vals))
+    calculator = Energy(settings).to(device)
+    
     try:  # calculation might fail for random choice of parameters
             # Eat, E, Eel, Enuc, Eiso, EnucAB, orb_eigs, P, q, gap, fail
         res = calculator(const, coordinates, species, learnedpar, all_terms=True)
@@ -192,13 +201,13 @@ def run_calculation(p, calculator=None, coordinates=None,
         res[-1] = True
     return p, coordinates, res
     
-#def clear_results_cache(): run_calculation.cache_clear()
+def clear_results_cache(): run_calculation.cache_clear()
 
 
-def energy_loss(p, popt_list=[], calculator=None, coordinates=None,
-                species=None, Eref=0.):#, cache_container=None):
+def energy_loss(p, popt_list=(), coordinates=None, species=None, 
+                seqm_settings={}, Eref=0.):#, cache_container=None):
     """
-    Returns squared loss in energy per atom
+    Returns squared loss in energy per atom and energy
     
     Parameters:
     -----------
@@ -209,12 +218,12 @@ def energy_loss(p, popt_list=[], calculator=None, coordinates=None,
               ..., ]).flatten()
     popt_list : tuple, len #custom parameters / nAtoms
         names of custom parameters, e.g., ['g_ss', 'zeta_s']
-    calculator : pyseqm.basics.Energy object
-        SE-QC calculator instance for system
     coordinates : torch.Tensor, shape (nAtoms, 3)
         atomic positions in Ang
     species : torch.Tensor, shape (nAtoms,)
         atomic numbers in system
+    seqm_settings : dict
+        dictionary for seqm Energy calculator
     Eref : float or torch.Tensor(float), shape ()
         reference energy of system in eV
 #    cache_container : PyseqmContainer object (or None)
@@ -228,19 +237,22 @@ def energy_loss(p, popt_list=[], calculator=None, coordinates=None,
 #                                          coordinates   = coordinates,
 #                                          species       = species,
 #                                          custom_params = popt_list)
+    seqm_keys = tuple(seqm_settings.keys())
+    seqm_vals = tuple(seqm_settings.values())
     p, coordinates, res = run_calculation(p,
-                                          calculator=calculator,
                                           coordinates=coordinates,
                                           species=species,
-                                          custom_params=popt_list)
+                                          custom_params=popt_list,
+                                          setting_keys=seqm_keys,
+                                          setting_vals=seqm_vals)
     E, SCFfail = res[1], res[-1]
     if SCFfail: return np.inf
     deltaE = E - Eref
     L = deltaE*deltaE / species.shape[0]
-    return L
+    return L, E
     
-def energy_loss_jac(p, popt_list=[], calculator=None, coordinates=None,
-              species=None, Eref=0.):#, cache_container=None):
+def energy_loss_jac(p, popt_list=(), coordinates=None, species=None, 
+                    seqm_settings={}, Eref=0.):#, cache_container=None):
     """
     Gradient of square loss in energy per atom
     """
@@ -251,11 +263,14 @@ def energy_loss_jac(p, popt_list=[], calculator=None, coordinates=None,
 #                                          coordinates   = coordinates,
 #                                          species       = species,
 #                                          custom_params = popt_list)
+    seqm_keys = tuple(seqm_settings.keys())
+    seqm_vals = tuple(seqm_settings.values())
     p, coordinates, res = run_calculation(p,
-                                          calculator=calculator,
                                           coordinates=coordinates,
                                           species=species,
-                                          custom_params=popt_list)
+                                          custom_params=popt_list,
+                                          setting_keys=seqm_keys,
+                                          setting_vals=seqm_vals)
     E, SCFfail = res[1], res[-1]
     if SCFfail:
         dummy = p.clone().detach()
@@ -267,10 +282,11 @@ def energy_loss_jac(p, popt_list=[], calculator=None, coordinates=None,
     return 2.0 * dL_dp
     
 
-def atomization_loss(p, popt_list=[], calculator=None, coordinates=None,
-                     species=None, Eref=0.):#, cache_container=None):
+def atomization_loss(p, popt_list=(), coordinates=None, species=None, 
+                     seqm_settings={}, Eref=0.):#, cache_container=None):
     """
-    Returns squared loss in atomization energy per atom
+    Returns squared loss in atomization energy per atom and 
+    atomization energy
     
     Parameters:
     -----------
@@ -281,12 +297,12 @@ def atomization_loss(p, popt_list=[], calculator=None, coordinates=None,
               ..., ]).flatten()
     popt_list : tuple, len #custom parameters / nAtoms
         names of custom parameters, e.g., ['g_ss', 'zeta_s']
-    calculator : pyseqm.basics.Energy object
-        SE-QC calculator instance for system
     coordinates : torch.Tensor, shape (nAtoms, 3)
         atomic positions in Ang
     species : torch.Tensor, shape (nAtoms,)
         atomic numbers in system
+    seqm_settings : dict
+        dictionary for seqm Energy calculator
     Eref : float or torch.Tensor(float), shape ()
         reference atomization energy of system in eV
 #    cache_container : PyseqmContainer object (or None)
@@ -300,19 +316,22 @@ def atomization_loss(p, popt_list=[], calculator=None, coordinates=None,
 #                                          coordinates   = coordinates,
 #                                          species       = species,
 #                                          custom_params = popt_list)
+    seqm_keys = tuple(seqm_settings.keys())
+    seqm_vals = tuple(seqm_settings.values())
     p, coordinates, res = run_calculation(p,
-                                          calculator=calculator,
                                           coordinates=coordinates,
                                           species=species,
-                                          custom_params=popt_list)
+                                          custom_params=popt_list,
+                                          setting_keys=seqm_keys,
+                                          setting_vals=seqm_vals)
     Eat, SCFfail = res[0], res[-1]
     if SCFfail: return np.inf
     deltaE = Eat - Eref
     L = deltaE*deltaE / species.shape[0]
-    return L
+    return L, Eat
 
-def atomization_loss_jac(p, popt_list=[], calculator=None, coordinates=None,
-                         species=None, Eref=0.):#, cache_container=None):
+def atomization_loss_jac(p, popt_list=(), coordinates=None, species=None, 
+                         seqm_settings={}, Eref=0.):#, cache_container=None):
     """
     Gradient of square loss in atomization energy per atom
     """
@@ -323,11 +342,14 @@ def atomization_loss_jac(p, popt_list=[], calculator=None, coordinates=None,
 #                                          coordinates   = coordinates,
 #                                          species       = species,
 #                                          custom_params = popt_list)
+    seqm_keys = tuple(seqm_settings.keys())
+    seqm_vals = tuple(seqm_settings.values())
     p, coordinates, res = run_calculation(p,
-                                          calculator=calculator,
                                           coordinates=coordinates,
                                           species=species,
-                                          custom_params=popt_list)
+                                          custom_params=popt_list,
+                                          setting_keys=seqm_keys,
+                                          setting_vals=seqm_vals)
     Eat, SCFfail = res[0], res[-1]
     if SCFfail:
         dummy = p.clone().detach()
@@ -338,10 +360,10 @@ def atomization_loss_jac(p, popt_list=[], calculator=None, coordinates=None,
     dL_dp = deltaE * dE_dp / species.shape[0]
     return 2.0 * dL_dp
     
-def forces_loss(p, popt_list=[], calculator=None, coordinates=None,
-                species=None, Fref=None):#, cache_container=None):
+def forces_loss(p, popt_list=(), coordinates=None, species=None, 
+                seqm_settings={}, Fref=None):#, cache_container=None):
     """
-    Returns squared loss in atomic forces per atom
+    Returns squared loss in atomic forces per atom and force
     
     Parameters:
     -----------
@@ -352,12 +374,12 @@ def forces_loss(p, popt_list=[], calculator=None, coordinates=None,
               ..., ]).flatten()
     popt_list : tuple, len #custom parameters / nAtoms
         names of custom parameters, e.g., ['g_ss', 'zeta_s']
-    calculator : pyseqm.basics.Energy object
-        SE-QC calculator instance for system
     coordinates : torch.Tensor, shape (nAtoms, 3)
         atomic positions in Ang
     species : torch.Tensor, shape (nAtoms,)
         atomic numbers in system
+    seqm_settings : dict
+        dictionary for seqm Energy calculator
     Fref : torch.Tensor, shape (nAtoms, 3)
         reference forces (-gradient) of system in eV/Ang
 #    cache_container : PyseqmContainer object (or None)
@@ -372,20 +394,23 @@ def forces_loss(p, popt_list=[], calculator=None, coordinates=None,
 #                                          coordinates   = coordinates,
 #                                          species       = species,
 #                                          custom_params = popt_list)
+    seqm_keys = tuple(seqm_settings.keys())
+    seqm_vals = tuple(seqm_settings.values())
     p, coordinates, res = run_calculation(p,
-                                          calculator=calculator,
                                           coordinates=coordinates,
                                           species=species,
-                                          custom_params=popt_list)
+                                          custom_params=popt_list,
+                                          setting_keys=seqm_keys,
+                                          setting_vals=seqm_vals)
     E, SCFfail = res[1], res[-1] 
     if SCFfail: return np.inf
     F = -agrad(E, coordinates, retain_graph=True)[0][0]
     F = F - torch.sum(F, dim=0)  # remove COM force
     L = torch.square(F - Fref).sum() / species.shape[0]
-    return L
+    return L, F
     
-def forces_loss_jac(p, popt_list=[], calculator=None,coordinates=None,
-                    species=None, Fref=0.):#, cache_container=None):
+def forces_loss_jac(p, popt_list=(), coordinates=None, species=None, 
+                    seqm_settings={}, Fref=0.):#, cache_container=None):
     """
     Gradient of square loss of forces per atom
     
@@ -407,11 +432,14 @@ def forces_loss_jac(p, popt_list=[], calculator=None,coordinates=None,
 #                                          coordinates   = coordinates,
 #                                          species       = species,
 #                                          custom_params = popt_list)
+    seqm_keys = tuple(seqm_settings.keys())
+    seqm_vals = tuple(seqm_settings.values())
     p, coordinates, res = run_calculation(p,
-                                          calculator=calculator,
                                           coordinates=coordinates,
                                           species=species,
-                                          custom_params=popt_list)
+                                          custom_params=popt_list,
+                                          setting_keys=seqm_keys,
+                                          setting_vals=seqm_vals)
     E, SCFfail = res[1], res[-1] 
     if SCFfail:
         dummy = p.clone().detach()
@@ -434,10 +462,10 @@ def forces_loss_jac(p, popt_list=[], calculator=None,coordinates=None,
 #    return 2.0 * dL_dp.detach().numpy()
     
 
-def gap_loss(p, popt_list=[], calculator=None, coordinates=None,
-             species=None, gap_ref=0.):#, cache_container=None):
+def gap_loss(p, popt_list=(), coordinates=None, species=None, 
+             seqm_settings={}, gap_ref=0.):#, cache_container=None):
     """
-    Returns squared loss in HOMO-LUMO gap
+    Returns squared loss in HOMO-LUMO gap and HOMO-LUMO gap
     
     Parameters:
     -----------
@@ -448,12 +476,12 @@ def gap_loss(p, popt_list=[], calculator=None, coordinates=None,
               ..., ]).flatten()
     popt_list : tuple, len #custom parameters / nAtoms
         names of custom parameters, e.g., ['g_ss', 'zeta_s']
-    calculator : pyseqm.basics.Energy object
-        SE-QC calculator instance for system
     coordinates : torch.Tensor, shape (nAtoms, 3)
         atomic positions in Ang
     species : torch.Tensor, shape (nAtoms,)
         atomic numbers in system
+    seqm_settings : dict
+        dictionary for seqm Energy calculator
     gap_ref : float or torch.Tensor, shape ()
         reference HOMO-LUMO gap in eV
 #    cache_container : PyseqmContainer object (or None)
@@ -467,19 +495,22 @@ def gap_loss(p, popt_list=[], calculator=None, coordinates=None,
 #                                          coordinates   = coordinates,
 #                                          species       = species,
 #                                          custom_params = popt_list)
+    seqm_keys = tuple(seqm_settings.keys())
+    seqm_vals = tuple(seqm_settings.values())
     p, coordinates, res = run_calculation(p,
-                                          calculator=calculator,
                                           coordinates=coordinates,
                                           species=species,
-                                          custom_params=popt_list)
+                                          custom_params=popt_list,
+                                          setting_keys=seqm_keys,
+                                          setting_vals=seqm_vals)
     gap, SCFfail = res[9], res[-1]
     if SCFfail: return np.inf
     deltaG = gap - gap_ref
     L = deltaG * deltaG
-    return L
+    return L, gap
 
-def gap_loss_jac(p, popt_list=[], calculator=None, coordinates=None,
-                 species=None, gap_ref=0.):#, cache_container=None):
+def gap_loss_jac(p, popt_list=(), coordinates=None, species=None, 
+                 seqm_settings={}, gap_ref=0.):#, cache_container=None):
     """
     Gradient of squared loss in HOMO-LUMO gap
     """
@@ -490,11 +521,14 @@ def gap_loss_jac(p, popt_list=[], calculator=None, coordinates=None,
 #                                          coordinates   = coordinates, 
 #                                          species       = species,
 #                                          custom_params = popt_list)
+    seqm_keys = tuple(seqm_settings.keys())
+    seqm_vals = tuple(seqm_settings.values())
     p, coordinates, res = run_calculation(p,
-                                          calculator=calculator,
                                           coordinates=coordinates,
                                           species=species,
-                                          custom_params=popt_list)
+                                          custom_params=popt_list,
+                                          setting_keys=seqm_keys,
+                                          setting_vals=seqm_vals)
     gap, SCFfail = res[9], res[-1]
     if SCFfail:
         dummy = p.clone().detach()
@@ -511,35 +545,55 @@ class LossConstructor:
         self.include = []
         self.implemented_properties = ['energy', 'forces', 'gap',
                                        'atomization']
-        req = ['popt_list', 'calculator', 'coordinates', 'species']
+        req = ['popt_list', 'coordinates', 'species']
         if any(required not in kwargs for required in req):
-            msg = "Please specify'"+"', '".join(req)+"' as kwargs!"
+            msg = "Please specify '"+"', '".join(req)+"' as kwargs!"
             raise ValueError(msg)
 #        self.cacher = PyseqmContainer()
 #        kwargs.update({'cache_container':self.cacher})
+#        kwargs['popt_list'] = tuple(kwargs['popt_list'])
+        elements = [0]+sorted(set(kwargs['species'].reshape(-1).tolist()))
+        seqm_settings = {
+                         'method'             : 'AM1',
+                         'scf_eps'            : 1.0e-6,
+                         'scf_converger'      : [2,0.0],
+                         'sp2'                : sp2_def,
+                         'pair_outer_cutoff'  : 1.0e10,
+                         'Hf_flag'            : False,
+                        }
+        seqm_settings['elements'] = torch.tensor(elements)
+        seqm_settings['learned'] = tuple(kwargs['popt_list'])
+        seqm_settings['eig'] = True
+        calc_dict = kwargs.pop('calculator_options', {})
+        for k,v in calc_dict.items():
+            if type(v) is list: calc_dict[k] = tuple(v)
+        seqm_settings.update(calc_dict)
+        kwargs.update({'seqm_settings':seqm_settings})
         self.general_kwargs = kwargs
     
     def __call__(self, p, *args, **kwargs):
         p = torch.as_tensor(p, device=device)
         self.L = 0.
         for prop in self.include:
-            L_i = eval(prop+'_loss(p, *self.'+prop+'_args)')
+            L_i, p_i = eval(prop+'_loss(p, *self.'+prop+'_args)')
             L_i = L_i.detach().numpy()
             exec('self.'+prop+'_loss_val = L_i')
             self.L += eval('self.weight_'+prop+' * L_i')
+            exec('self.'+prop+'_val = p_i.detach().numpy()')
         return self.L
     
     def loss_and_jac(self, p, *args, **kwargs):
         p = torch.as_tensor(p, device=device)
         self.L, self.dLdp = 0., np.zeros_like(p)
         for prop in self.include:
-            L_i = eval(prop+'_loss(p, *self.'+prop+'_args)')
-            dLdp_i = eval(prop+'_loss_jac(p, *self.'+prop+'_args)')
+            L_i, p_i = eval(prop+'_loss(p, *self.'+prop+'_args)')
             L_i = L_i.detach().numpy()
-            dLdp_i = dLdp_i.detach().numpy()
             exec('self.'+prop+'_loss_val = L_i')
-            exec('self.'+prop+'_loss_grad = dLdp_i')
             self.L += eval('self.weight_'+prop+' * L_i')
+            exec('self.'+prop+'_val = p_i.detach().numpy()')
+            dLdp_i = eval(prop+'_loss_jac(p, *self.'+prop+'_args)')
+            dLdp_i = dLdp_i.detach().numpy()
+            exec('self.'+prop+'_loss_grad = dLdp_i')
             self.dLdp += eval('self.weight_'+prop+' * dLdp_i')
         return (self.L, self.dLdp)
     
@@ -623,3 +677,20 @@ class LossConstructor:
         if type(out) in [np.ndarray, list]:
             if np.size(out) == 1: out = float(out)
         return out
+    
+    def get_property(self, prop):
+        """
+        Return property as entering loss function
+        
+        Parameters:
+        -----------
+        prop : str
+            property to return ('energy', 'forces', ...)
+        """
+        if not hasattr(self, prop+'_val'):
+            raise ValueError("Property '"+prop+"' not available.")
+        out = eval('self.'+prop+'_val')
+        if type(out) in [np.ndarray, list]:
+            if np.size(out) == 1: out = float(out)
+        return out
+

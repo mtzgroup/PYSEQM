@@ -196,7 +196,7 @@ def get_default_parameters(species, method, parameter_dir, param_list):
     return default_p
     
 def get_par_names_bounds_defaults(species, method, parameter_dir, 
-                                  change_zeros=False):
+                                  change_zeros=False, with_eq=True):
     """
     Returns all parameter names, corresponding default values, standard 
     bounds (spanning wide space), constraints (physically-reasonable space).
@@ -216,6 +216,9 @@ def get_par_names_bounds_defaults(species, method, parameter_dir,
         path to directory with default parameters
     change_zeros : bool (default False)
         whether or not to change parameters with zero default value
+    with_eq: bool (default True)
+        allow equality constraints in bounds, otherwise return loose
+        bounds and tight constraints
     """
     pnames = parameter_names[method]
     nA = species.size()[-1]
@@ -226,21 +229,28 @@ def get_par_names_bounds_defaults(species, method, parameter_dir,
     pdef = get_default_parameters(species, method, parameter_dir, pnames)
     def4b = pdef.clone().detach().numpy()
     def4c = def4b.copy().flatten()
-    zero_idx = np.argwhere(np.abs(def4b)<1e-8)
-    ## bounds in some optimizers cannot be equal (fixed parameter)
-    ## as this causes problem in mapping parameter to [0;1)
-    ## we use placeholder bounds and introduce constraints to fix values
-    for ij in zero_idx:
-        def4b[tuple(ij)] = max_defaults[method][pnames[ij[0]]]
-    def4b = def4b.flatten()
-    low_b, upp_b = np.sort(lowupp * def4b, axis=0)
-    low_b = np.minimum(low_b, def4c)
-    upp_b = np.maximum(upp_b, def4c)
-    pbounds = Bounds(low_b, upp_b)
-    if change_zeros: def4c = def4b
-    low_c, upp_c = np.sort(lowupp * def4c, axis=0)
-    pconstr = LinearConstraint(np.eye(low_c.size), low_c, upp_c)
-    return tuple(pnames), pdef, pbounds, pconstr
+    if with_eq:
+        def4b = def4b.flatten()
+        low_b, upp_b = np.sort(lowupp * def4b, axis=0)
+        pbounds = Bounds(low_b, upp_b)
+        return tuple(pnames), pdef, pbounds, None
+    else:
+        def4c = def4b.copy().flatten()
+        zero_idx = np.argwhere(np.abs(def4b)<1e-8)
+        ## bounds in some optimizers cannot be equal (fixed parameter)
+        ## as this causes problem in mapping parameters to [0;1)
+        ## use placeholder bounds and then constraints to fix values
+        for ij in zero_idx:
+            def4b[tuple(ij)] = max_defaults[method][pnames[ij[0]]]
+        def4b = def4b.flatten()
+        low_b, upp_b = np.sort(lowupp * def4b, axis=0)
+        low_b = np.minimum(low_b, def4c)
+        upp_b = np.maximum(upp_b, def4c)
+        pbounds = Bounds(low_b, upp_b)
+        if change_zeros: def4c = def4b
+        low_c, upp_c = np.sort(lowupp * def4c, axis=0)
+        pconstr = LinearConstraint(np.eye(low_c.size), low_c, upp_c)
+        return tuple(pnames), pdef, pbounds, pconstr
     
 
 def get_ordered_args(func, **kwargs):

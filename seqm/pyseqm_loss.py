@@ -6,7 +6,8 @@ from seqm.basics import Parser, Energy
 from seqm.seqm_functions.constants import Constants
 from seqm.pyseqm_helpers import get_ordered_args
 
-MAX_CACHE_SIZE=16
+MAX_CACHE_SIZE=0
+LFAIL = torch.tensor(torch.inf)
 
 
 torch.set_default_dtype(torch.float64)
@@ -246,7 +247,7 @@ def energy_loss(p, popt_list=(), coordinates=None, species=None,
                                           setting_keys=seqm_keys,
                                           setting_vals=seqm_vals)
     E, SCFfail = res[1], res[-1]
-    if SCFfail: return np.inf
+    if SCFfail: return LFAIL, LFAIL
     deltaE = E - Eref
     L = deltaE*deltaE / species.shape[0]
     return L, E
@@ -274,7 +275,7 @@ def energy_loss_jac(p, popt_list=(), coordinates=None, species=None,
     E, SCFfail = res[1], res[-1]
     if SCFfail:
         dummy = p.clone().detach()
-        return np.inf*np.sign(dummy).flatten()
+        return torch.inf*torch.sign(dummy).flatten()
     deltaE = E - Eref
     dE_dp = agrad(E, p, retain_graph=True)[0]
     dE_dp = dE_dp.flatten()
@@ -325,7 +326,7 @@ def atomization_loss(p, popt_list=(), coordinates=None, species=None,
                                           setting_keys=seqm_keys,
                                           setting_vals=seqm_vals)
     Eat, SCFfail = res[0], res[-1]
-    if SCFfail: return np.inf
+    if SCFfail: return LFAIL, LFAIL
     deltaE = Eat - Eref
     L = deltaE*deltaE / species.shape[0]
     return L, Eat
@@ -353,9 +354,9 @@ def atomization_loss_jac(p, popt_list=(), coordinates=None, species=None,
     Eat, SCFfail = res[0], res[-1]
     if SCFfail:
         dummy = p.clone().detach()
-        return np.inf*np.sign(dummy).flatten()
+        return torch.inf*torch.sign(dummy).flatten()
     deltaE = Eat - Eref
-    dE_dp = agrad(E, p, retain_graph=True)[0]
+    dE_dp = agrad(Eat, p, retain_graph=True)[0]
     dE_dp = dE_dp.flatten()
     dL_dp = deltaE * dE_dp / species.shape[0]
     return 2.0 * dL_dp
@@ -403,7 +404,9 @@ def forces_loss(p, popt_list=(), coordinates=None, species=None,
                                           setting_keys=seqm_keys,
                                           setting_vals=seqm_vals)
     E, SCFfail = res[1], res[-1] 
-    if SCFfail: return np.inf
+    if SCFfail:
+        FFAIL = torch.inf * torch.ones_like(coordinates)
+        return LFAIL, FFAIL
     F = -agrad(E, coordinates, retain_graph=True)[0][0]
     F = F - torch.sum(F, dim=0)  # remove COM force
     L = torch.square(F - Fref).sum() / species.shape[0]
@@ -443,7 +446,7 @@ def forces_loss_jac(p, popt_list=(), coordinates=None, species=None,
     E, SCFfail = res[1], res[-1] 
     if SCFfail:
         dummy = p.clone().detach()
-        return np.inf*np.sign(dummy).flatten()
+        return torch.inf*torch.sign(dummy).flatten()
     F = -agrad(E, coordinates, create_graph=True)[0][0]
     F = F - torch.sum(F, dim=0)  # remove COM force
     L = torch.square(F - Fref).sum()
@@ -504,7 +507,7 @@ def gap_loss(p, popt_list=(), coordinates=None, species=None,
                                           setting_keys=seqm_keys,
                                           setting_vals=seqm_vals)
     gap, SCFfail = res[9], res[-1]
-    if SCFfail: return np.inf
+    if SCFfail: return LFAIL, LFAIL
     deltaG = gap - gap_ref
     L = deltaG * deltaG
     return L, gap
@@ -532,7 +535,7 @@ def gap_loss_jac(p, popt_list=(), coordinates=None, species=None,
     gap, SCFfail = res[9], res[-1]
     if SCFfail:
         dummy = p.clone().detach()
-        return np.inf*np.sign(dummy).flatten()
+        return torch.inf*torch.sign(dummy).flatten()
     deltaG = gap - gap_ref
     L = deltaG * deltaG
     with torch.autograd.set_detect_anomaly(True):

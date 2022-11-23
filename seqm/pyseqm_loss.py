@@ -4,7 +4,8 @@ from functools import lru_cache
 from torch.autograd import grad as agrad
 from seqm.basics import Parser, Energy
 from seqm.seqm_functions.constants import Constants
-from seqm.pyseqm_helpers import get_ordered_args
+from seqm.pyseqm_helpers import get_ordered_args, scale_from_unit_cube, \
+                                scale_to_unit_cube
 
 MAX_CACHE_SIZE=0
 LFAIL = torch.tensor(torch.inf)
@@ -544,18 +545,21 @@ def gap_loss_jac(p, popt_list=(), coordinates=None, species=None,
     
 
 class LossConstructor:
-    def __init__(self, **kwargs):
+    def __init__(self, popt_list=(), coordinates=None, species=None, 
+                 bounds=None, unit_cube=False, **kwargs):
         self.include = []
         self.implemented_properties = ['energy', 'forces', 'gap',
                                        'atomization']
-        req = ['popt_list', 'coordinates', 'species']
-        if any(required not in kwargs for required in req):
-            msg = "Please specify '"+"', '".join(req)+"' as kwargs!"
-            raise ValueError(msg)
 #        self.cacher = PyseqmContainer()
 #        kwargs.update({'cache_container':self.cacher})
-#        kwargs['popt_list'] = tuple(kwargs['popt_list'])
-        elements = [0]+sorted(set(kwargs['species'].reshape(-1).tolist()))
+        popt_list = tuple(popt_list)
+        if unit_cube and bounds is None:
+            msg  = "For remapping to the unit hypercube, you need to "
+            msg += "specify bounds, my friend!"
+            raise ValueError(msg)
+        self.bounds = bounds
+        self.unit_cube = unit_cube
+        elements = [0]+sorted(set(species.reshape(-1).tolist()))
         seqm_settings = {
                          'method'             : 'AM1',
                          'scf_eps'            : 1.0e-6,
@@ -565,16 +569,19 @@ class LossConstructor:
                          'Hf_flag'            : False,
                         }
         seqm_settings['elements'] = torch.tensor(elements)
-        seqm_settings['learned'] = tuple(kwargs['popt_list'])
+        seqm_settings['learned'] = popt_list
         seqm_settings['eig'] = True
         calc_dict = kwargs.pop('calculator_options', {})
         for k,v in calc_dict.items():
             if type(v) is list: calc_dict[k] = tuple(v)
         seqm_settings.update(calc_dict)
         kwargs.update({'seqm_settings':seqm_settings})
+        kwargs.update({'popt_list':popt_list,'coordinates':coordinates,
+                       'species':species})
         self.general_kwargs = kwargs
     
     def __call__(self, p, *args, **kwargs):
+        if self.unit_cube: p = scale_from_unit_cube(p, self.bounds)
         p = torch.as_tensor(p, device=device)
         self.L = 0.
         for prop in self.include:
@@ -586,6 +593,7 @@ class LossConstructor:
         return self.L
     
     def loss_and_jac(self, p, *args, **kwargs):
+        if self.unit_cube: p = scale_from_unit_cube(p, self.bounds)
         p = torch.as_tensor(p, device=device)
         self.L, self.dLdp = 0., np.zeros_like(p)
         for prop in self.include:
@@ -598,9 +606,12 @@ class LossConstructor:
             dLdp_i = dLdp_i.detach().numpy()
             exec('self.'+prop+'_loss_grad = dLdp_i')
             self.dLdp += eval('self.weight_'+prop+' * dLdp_i')
+        if self.unit_cube: self.dLdp = scale_to_unit_cube(self.dLdp, 
+                                        self.bounds, for_gradient=True)
         return (self.L, self.dLdp)
     
     def jac(self, p, *args, **kwargs):
+        if self.unit_cube: p = scale_from_unit_cube(p, self.bounds)
         p = torch.as_tensor(p, device=device)
         self.dLdp = np.zeros_like(p)
         for prop in self.include:
@@ -608,6 +619,8 @@ class LossConstructor:
             dLdp_i = dLdp_i.detach().numpy()
             exec('self.'+prop+'_loss_grad = dLdp_i')
             self.dLdp += eval('self.weight_'+prop+' * dLdp_i')
+        if self.unit_cube: self.dLdp = scale_to_unit_cube(self.dLdp, 
+                                        self.bounds, for_gradient=True)
         return self.dLdp
     
     def add_loss(self, prop, weight=1., **kwargs):

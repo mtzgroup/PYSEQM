@@ -95,6 +95,27 @@ max_defaults = {
 }
 
 
+def scale_from_unit_cube(x, bounds, for_gradient=False):
+    """
+    Rescale input vector to the unit hypercube within the specified bounds.
+    """
+    shift = 0.5 * (bounds.ub + bounds.lb)
+    span = np.fabs(bounds.ub - bounds.lb)
+    if for_gradient: return x * span
+    return shift + (x - 0.5) * span
+
+def scale_to_unit_cube(x, bounds, for_gradient=False):
+    """
+    Rescale input vector to the unit hypercube within the specified bounds.
+    """
+    shift = 0.5 * (bounds.ub + bounds.lb)
+    signed_span = bounds.ub - bounds.lb
+    span_mask = np.abs(signed_span) < 1e-12
+    span = np.where(span_mask, 1., np.fabs(signed_span))
+    if for_gradient: return np.where(span_mask, 0., x/span)
+    return np.where(span_mask, 1., (x - shift) / span + 0.5)
+    
+
 class pyseqm_orderator:
     """
     Class to handle inputs and output of pyseqm calculation.
@@ -219,6 +240,22 @@ def get_par_names_bounds_defaults(species, method, parameter_dir,
     with_eq: bool (default True)
         allow equality constraints in bounds, otherwise return loose
         bounds and tight constraints
+    
+    Returns:
+    --------
+    pnames : tuple
+        parameter names of <method>
+    pdef : torch.Tensor, shape(n_parameters, nAtoms)
+        default values of parameters per atom
+    pbounds : scipy.optimize Bounds object
+        bounds for parameters
+    pconstr : scipy LinearConstraint object
+        constraints for optimization (these differ from the loose bounds
+        if not <with_eq>)
+    uc_bounds : scipy.optimize Bounds object
+        bounds for optimizations within unit hypercube
+    uc_constr : scipy LinearConstraint object
+        same as above for unit hypercube
     """
     pnames = parameter_names[method]
     nA = species.size()[-1]
@@ -232,8 +269,11 @@ def get_par_names_bounds_defaults(species, method, parameter_dir,
     if with_eq:
         def4b = def4b.flatten()
         low_b, upp_b = np.sort(lowupp * def4b, axis=0)
+        eq_mask = np.abs(upp_b - low_b) < 1e-12
         pbounds = Bounds(low_b, upp_b)
-        return tuple(pnames), pdef, pbounds, None
+        low_uc = np.where(eq_mask, 1., 0.)
+        uc_bounds = Bounds(low_uc, np.ones_like(upp_b))
+        return tuple(pnames), pdef, pbounds, None, uc_bounds, None
     else:
         def4c = def4b.copy().flatten()
         zero_idx = np.argwhere(np.abs(def4b)<1e-8)
@@ -247,10 +287,14 @@ def get_par_names_bounds_defaults(species, method, parameter_dir,
         low_b = np.minimum(low_b, def4c)
         upp_b = np.maximum(upp_b, def4c)
         pbounds = Bounds(low_b, upp_b)
+        uc_bounds = Bounds(np.zeros_like(low_b),np.ones_like(upp_b))
         if change_zeros: def4c = def4b
         low_c, upp_c = np.sort(lowupp * def4c, axis=0)
         pconstr = LinearConstraint(np.eye(low_c.size), low_c, upp_c)
-        return tuple(pnames), pdef, pbounds, pconstr
+        low_uc = scale_to_unit_cube(low_uc, pbounds)
+        upp_uc = scale_to_unit_cube(upp_c, pbounds)
+        uc_constr = LinearConstraint(np.eye(low_uc.size), low_uc, upp_uc)
+        return tuple(pnames), pdef, pbounds, pconstr, uc_bounds, uc_constr
     
 
 def get_ordered_args(func, **kwargs):
@@ -278,12 +322,14 @@ def get_ordered_args(func, **kwargs):
     return tuple(ordered_args)
 
    
-def post_process_result(p, p_init, loss_func, nAtoms):
-    p_ref = np.reshape(p_init,(-1,nAtoms))
-    p_opt = np.reshape(p,(-1,nAtoms))
-    dp = p_opt - p_ref
-    gradL = approx_fprime(p, loss_func, 1.49e-7)
-    gradL = np.reshape(gradL,(-1,nAtoms))
+def post_process_result(p, p_init, loss_func, nAtoms, unit_cube=False, 
+                        bounds=None):
+    if unit_cube and bounds is None:
+        msg  = "For remapping to the unit hypercube, you need to "
+        msg += "specify bounds, my friend!"
+        raise ValueError(msg)
+    ## estimate gradient wrt input p (on whatever scale input is!)
+    gradL = approx_fprime(p, loss_func)
     loss_init = loss_func(p_init)
     if type(loss_init) in [np.ndarray, list]:
         if np.size(loss_init) == 1: loss_init = float(loss_init)
@@ -291,6 +337,19 @@ def post_process_result(p, p_init, loss_func, nAtoms):
     if type(loss_opt) in [np.ndarray, list]:
         if np.size(loss_opt) == 1: loss_opt = float(loss_opt)
     dloss = loss_opt - loss_init
+    if unit_cube:
+        p_init = scale_from_unit_cube(p_init, bounds)
+        p = scale_from_unit_cube(p, bounds)
+        ## if input p is on unit cube scale, `loss_func` contains
+        ## an additional `scale_from_unit_cube`, which is reflected
+        ## in the numerical gradient.
+        ## Thus, we need to do the *inverse* operation here.
+        ## (equivalent to remapping p before taking the FD gradient)
+        gradL = scale_to_unit_cube(gradL, bounds, for_gradient=True)
+    p_ref = np.reshape(p_init,(-1,nAtoms))
+    p_opt = np.reshape(p,(-1,nAtoms))
+    dp = p_opt - p_ref
+    gradL = np.reshape(gradL,(-1,nAtoms))
     return p_opt, dp, gradL, loss_opt, dloss
     
 
@@ -355,9 +414,8 @@ def write_gradient_summary(gradL, symbols, pname_list, writer='stdout', close_af
         gstr  = ' {0:<12s}: '.format(pname)
         gstr += ''.join(['{0: 5.2e}  '.format(g) for g in gradL[i]])
         writer(gstr[:-2]+'\n')
-    if close_after:
-        if hasattr(writer, 'close'): writer.close()
+    if close_after and hasattr(writer, 'close'): writer.close()
     return
-    
+
 
 #--EOF--# 

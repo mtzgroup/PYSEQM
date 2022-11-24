@@ -291,7 +291,7 @@ def get_par_names_bounds_defaults(species, method, parameter_dir,
         if change_zeros: def4c = def4b
         low_c, upp_c = np.sort(lowupp * def4c, axis=0)
         pconstr = LinearConstraint(np.eye(low_c.size), low_c, upp_c)
-        low_uc = scale_to_unit_cube(low_uc, pbounds)
+        low_uc = scale_to_unit_cube(low_c, pbounds)
         upp_uc = scale_to_unit_cube(upp_c, pbounds)
         uc_constr = LinearConstraint(np.eye(low_uc.size), low_uc, upp_uc)
         return tuple(pnames), pdef, pbounds, pconstr, uc_bounds, uc_constr

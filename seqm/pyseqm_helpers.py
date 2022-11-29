@@ -217,7 +217,7 @@ def get_default_parameters(species, method, parameter_dir, param_list):
     return default_p
     
 def get_default_bounds(parameters, species, method, parameter_dir, 
-                       change_zeros=False, with_eq=True):
+                       change_zeros=False, with_eq=True, tight_bounds=True):
     """
     Returns default bounds (spanning wide space) and constraints (physically-
     reasonable space). Bounds are given as multiples of default values.
@@ -245,6 +245,9 @@ def get_default_bounds(parameters, species, method, parameter_dir,
     with_eq: bool (default True)
         allow equality constraints in bounds, otherwise return loose
         bounds and tight constraints
+    tight_bounds : bool (default True)
+        if not using equality constraints, use tight placeholder bounds
+        (ABSOLUTELY NOT recommended for use with change_zeros=True)
     
     Returns:
     --------
@@ -257,6 +260,11 @@ def get_default_bounds(parameters, species, method, parameter_dir,
     uconstr : scipy LinearConstraint object
         constraints for optimization within unit hypercube
     """
+    if change_zeros:
+        nonsensemsg  = "Changing zero defaults only makes sense with"
+        nonsensemsg += "`with_eq=False` and `tight_bounds=False`!"
+        if with_eq or (~with_eq and tight_bounds):
+            raise ValueError(nonsensemsg)
     nA = species.size()[-1]
     bounds = [default_multi_bound[par] for par in parameters]
     bounds_expanded = np.array([[b,]*nA for b in bounds]).T
@@ -277,19 +285,29 @@ def get_default_bounds(parameters, species, method, parameter_dir,
         def4c = def4b.copy().flatten()
         zero_idx = np.argwhere(np.abs(def4b)<1e-8)
         ## bounds in some optimizers cannot be equal (fixed parameter)
-        ## as this causes problem in mapping parameters to [0;1)
-        ## use placeholder bounds and then constraints to fix values
-        for ij in zero_idx:
-            def4b[tuple(ij)] = max_defaults[method][parameters[ij[0]]]
+        ## as this causes problem in mapping parameters to [0;1).
+        ## Use placeholder bounds and then constraints to fix values.
+        ## The bounds can be tight (+/- eps) or loose (see `max_defaults`).
+        if not tight_bounds:
+            for ij in zero_idx:
+                def4b[tuple(ij)] = max_defaults[method][parameters[ij[0]]]
         def4b = def4b.flatten()
         low_b, upp_b = np.sort(lowupp * def4b, axis=0)
-        low_b = np.minimum(low_b, def4c)
-        upp_b = np.maximum(upp_b, def4c)
+        if tight_bounds:
+            eq_mask = np.abs(upp_b - low_b) < 1e-12
+            low_b = np.where(eq_mask, low_b - 1e-6, low_b)
+            upp_b = np.where(eq_mask, upp_b + 1e-6, upp_b)
+        else:
+            low_b = np.minimum(low_b, def4c)
+            upp_b = np.maximum(upp_b, def4c)
         pbounds = Bounds(low_b, upp_b)
         if change_zeros: def4c = def4b
         low_c, upp_c = np.sort(lowupp * def4c, axis=0)
         pconstr = LinearConstraint(np.eye(low_c.size), low_c, upp_c)
-        ubounds = Bounds(np.zeros_like(upp_c),np.ones_like(upp_c))
+        if tight_bounds:
+            ubounds = Bounds(np.ones_like(upp_c)-2e-6,np.ones_like(upp_c))
+        else:
+            ubounds = Bounds(np.zeros_like(upp_c),np.ones_like(upp_c))
         low_uc = scale_to_unit_cube(low_c, pbounds)
         upp_uc = scale_to_unit_cube(upp_c, pbounds)
         uconstr = LinearConstraint(np.eye(low_uc.size), low_uc, upp_uc)

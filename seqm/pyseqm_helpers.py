@@ -216,19 +216,24 @@ def get_default_parameters(species, method, parameter_dir, param_list):
     default_p = default_p[species][0].transpose(0,1).contiguous()
     return default_p
     
-def get_par_names_bounds_defaults(species, method, parameter_dir, 
-                                  change_zeros=False, with_eq=True):
+def get_default_bounds(parameters, species, method, parameter_dir, 
+                       change_zeros=False, with_eq=True):
     """
-    Returns all parameter names, corresponding default values, standard 
-    bounds (spanning wide space), constraints (physically-reasonable space).
-        Bounds are given as multiples of default values
+    Returns default bounds (spanning wide space) and constraints (physically-
+    reasonable space). Bounds are given as multiples of default values.
+    
     If change_zeros: Extend bounds for entries that have 0. as default value
         (These should be irrelevant for the system and might only complicate,
          for example, optimization, but becomes relevant when extending the
          default parametrization.)
+    If with_eq:
+        allow for equality constraints defined through equivalent upper and
+        lower bounds (otherwise put equality condition in constraints)
     
     Parameters:
     -----------
+    parameters : tuple of str
+        names of parameters to return original values and bounds for
     species : torch.Tensor / array-like, shape (nAtoms,)
         atomic numbers
     method : str
@@ -243,37 +248,31 @@ def get_par_names_bounds_defaults(species, method, parameter_dir,
     
     Returns:
     --------
-    pnames : tuple
-        parameter names of <method>
-    pdef : torch.Tensor, shape(n_parameters, nAtoms)
-        default values of parameters per atom
     pbounds : scipy.optimize Bounds object
-        bounds for parameters
+        bounds for parameters (parameter space)
     pconstr : scipy LinearConstraint object
-        constraints for optimization (these differ from the loose bounds
-        if not <with_eq>)
-    uc_bounds : scipy.optimize Bounds object
-        bounds for optimizations within unit hypercube
-    uc_constr : scipy LinearConstraint object
-        same as above for unit hypercube
+        constraints for optimization (parameter space)
+    ubounds : scipy.optimize Bounds object
+        bounds for parameters in unit hypercube
+    uconstr : scipy LinearConstraint object
+        constraints for optimization within unit hypercube
     """
-    pnames = parameter_names[method]
     nA = species.size()[-1]
-    bounds = [default_multi_bound[par] for par in pnames]
+    bounds = [default_multi_bound[par] for par in parameters]
     bounds_expanded = np.array([[b,]*nA for b in bounds]).T
     lowupp = np.array([bounds_expanded[0].T.flatten(),
                        bounds_expanded[1].T.flatten()])
-    pdef = get_default_parameters(species, method, parameter_dir, pnames)
+    pdef = get_default_parameters(species, method, parameter_dir,parameters)
     def4b = pdef.clone().detach().numpy()
     def4c = def4b.copy().flatten()
     if with_eq:
         def4b = def4b.flatten()
         low_b, upp_b = np.sort(lowupp * def4b, axis=0)
-        eq_mask = np.abs(upp_b - low_b) < 1e-12
         pbounds = Bounds(low_b, upp_b)
+        eq_mask = np.abs(upp_b - low_b) < 1e-12
         low_uc = np.where(eq_mask, 1., 0.)
-        uc_bounds = Bounds(low_uc, np.ones_like(upp_b))
-        return tuple(pnames), pdef, pbounds, None, uc_bounds, None
+        ubounds = Bounds(low_uc, np.ones_like(low_uc))
+        return pbounds, None, ubounds, None
     else:
         def4c = def4b.copy().flatten()
         zero_idx = np.argwhere(np.abs(def4b)<1e-8)
@@ -281,22 +280,25 @@ def get_par_names_bounds_defaults(species, method, parameter_dir,
         ## as this causes problem in mapping parameters to [0;1)
         ## use placeholder bounds and then constraints to fix values
         for ij in zero_idx:
-            def4b[tuple(ij)] = max_defaults[method][pnames[ij[0]]]
+            def4b[tuple(ij)] = max_defaults[method][parameters[ij[0]]]
         def4b = def4b.flatten()
         low_b, upp_b = np.sort(lowupp * def4b, axis=0)
         low_b = np.minimum(low_b, def4c)
         upp_b = np.maximum(upp_b, def4c)
         pbounds = Bounds(low_b, upp_b)
-        uc_bounds = Bounds(np.zeros_like(low_b),np.ones_like(upp_b))
         if change_zeros: def4c = def4b
         low_c, upp_c = np.sort(lowupp * def4c, axis=0)
         pconstr = LinearConstraint(np.eye(low_c.size), low_c, upp_c)
+        ubounds = Bounds(np.zeros_like(upp_c),np.ones_like(upp_c))
         low_uc = scale_to_unit_cube(low_c, pbounds)
         upp_uc = scale_to_unit_cube(upp_c, pbounds)
-        uc_constr = LinearConstraint(np.eye(low_uc.size), low_uc, upp_uc)
-        return tuple(pnames), pdef, pbounds, pconstr, uc_bounds, uc_constr
+        uconstr = LinearConstraint(np.eye(low_uc.size), low_uc, upp_uc)
+        return pbounds, pconstr, ubounds, uconstr
     
-
+def get_parameter_names(method):
+    """ Returns tuple of all parameter nemaes for <method>. """
+    return tuple(parameter_names[method])
+    
 def get_ordered_args(func, **kwargs):
     """
     Returns kwarg input to function `func` ordered for position arg input 
@@ -323,13 +325,12 @@ def get_ordered_args(func, **kwargs):
 
    
 def post_process_result(p, p_init, loss_func, nAtoms, unit_cube=False, 
-                        bounds=None):
-    if unit_cube and bounds is None:
-        msg  = "For remapping to the unit hypercube, you need to "
-        msg += "specify bounds, my friend!"
-        raise ValueError(msg)
+                        bounds=None, jac=None):
     ## estimate gradient wrt input p (on whatever scale input is!)
-    gradL = approx_fprime(p, loss_func)
+    if callable(jac):
+        gradL = jac(p)
+    else:
+        gradL = approx_fprime(p, loss_func)
     loss_init = loss_func(p_init)
     if type(loss_init) in [np.ndarray, list]:
         if np.size(loss_init) == 1: loss_init = float(loss_init)

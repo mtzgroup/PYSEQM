@@ -582,7 +582,7 @@ class LossConstructor:
     
     def __call__(self, p, *args, **kwargs):
         if self.unit_cube: p = scale_from_unit_cube(p, self.bounds)
-        p = torch.as_tensor(p, device=device)
+        p = torch.tensor(p, device=device)
         self.L = 0.
         for prop in self.include:
             L_i, p_i = eval(prop+'_loss(p, *self.'+prop+'_args)')
@@ -594,7 +594,7 @@ class LossConstructor:
     
     def loss_and_jac(self, p, *args, **kwargs):
         if self.unit_cube: p = scale_from_unit_cube(p, self.bounds)
-        p = torch.as_tensor(p, device=device)
+        p = torch.tensor(p, device=device)
         self.L, self.dLdp = 0., np.zeros_like(p)
         for prop in self.include:
             L_i, p_i = eval(prop+'_loss(p, *self.'+prop+'_args)')
@@ -612,7 +612,7 @@ class LossConstructor:
     
     def jac(self, p, *args, **kwargs):
         if self.unit_cube: p = scale_from_unit_cube(p, self.bounds)
-        p = torch.as_tensor(p, device=device)
+        p = torch.tensor(p, device=device)
         self.dLdp = np.zeros_like(p)
         for prop in self.include:
             dLdp_i = eval(prop+'_loss_jac(p, *self.'+prop+'_args)')

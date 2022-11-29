@@ -586,7 +586,7 @@ class LossConstructor:
         self.L = 0.
         for prop in self.include:
             L_i, p_i = eval(prop+'_loss(p, *self.'+prop+'_args)')
-            L_i = L_i.detach().numpy()
+            L_i = L_i.item()
             exec('self.'+prop+'_loss_val = L_i')
             self.L += eval('self.weight_'+prop+' * L_i')
             exec('self.'+prop+'_val = p_i.detach().numpy()')
@@ -598,7 +598,7 @@ class LossConstructor:
         self.L, self.dLdp = 0., np.zeros_like(p)
         for prop in self.include:
             L_i, p_i = eval(prop+'_loss(p, *self.'+prop+'_args)')
-            L_i = L_i.detach().numpy()
+            L_i = L_i.item()
             exec('self.'+prop+'_loss_val = L_i')
             self.L += eval('self.weight_'+prop+' * L_i')
             exec('self.'+prop+'_val = p_i.detach().numpy()')

@@ -434,7 +434,7 @@ def write_gradient_summary(gradL, symbols, pname_list, writer='stdout', close_af
         gstr += ''.join(['{0: 5.2e}  '.format(g) for g in gradL[i]])
         writer(gstr[:-2]+'\n')
     gradL = gradL.flatten()
-    i = argmax(np.abs(gradL))
+    i = np.argmax(np.abs(gradL))
     writer('#MAX_GRAD: Maximum (absolute) component of loss gradient\n')
     writer('{0: 5.2e}  '.format(gradL[i]))
     if close_after and hasattr(writer, 'close'): writer.close()

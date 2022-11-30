@@ -304,10 +304,10 @@ def get_default_bounds(parameters, species, method, parameter_dir,
         if change_zeros: def4c = def4b
         low_c, upp_c = np.sort(lowupp * def4c, axis=0)
         pconstr = LinearConstraint(np.eye(low_c.size), low_c, upp_c)
-        if tight_bounds:
-            ubounds = Bounds(np.ones_like(upp_c)-2e-6,np.ones_like(upp_c))
-        else:
-            ubounds = Bounds(np.zeros_like(upp_c),np.ones_like(upp_c))
+        ## unit cube
+        low_ub = scale_to_unit_cube(low_b, pbounds)
+        upp_ub = scale_to_unit_cube(upp_b, pbounds)
+        ubounds = Bounds(low_ub, upp_ub)
         low_uc = scale_to_unit_cube(low_c, pbounds)
         upp_uc = scale_to_unit_cube(upp_c, pbounds)
         uconstr = LinearConstraint(np.eye(low_uc.size), low_uc, upp_uc)
@@ -372,25 +372,39 @@ def post_process_result(p, p_init, loss_func, nAtoms, unit_cube=False,
     return p_opt, dp, gradL, loss_opt, dloss
     
 
-def get_writer(writer_in, closing_in=False):
+class write_obj:
+    def __init__(self, writer, closer):
+        self.writer, self.closer = writer, closer
+    def __call__(self, s):
+        self.writer(s)
+    def close(self): self.closer()
+
+def get_writer(writer_in):
+    if isinstance(writer_in, write_obj): return writer_in
+    from io import IOBase
     if writer_in == 'stdout':
         from sys import stdout
-        writer_in = stdout.writelines
+        writer_call = stdout.writelines
+        def closer_call(): pass
     elif type(writer_in) is str:
         f = open(writer_in, 'a')
-        writer_in = f.write
-        closing_in = True
-    elif not callable(writer_in):
+        writer_call = f.write
+        closer_call = f.close
+    elif isinstance(writer_in, IOBase):
+        writer_call = writer_in.write
+        closer_call = writer_in.close
+    else:
         msg  = "Input 'writer' has to be 'stdout', file_name, or "
-        msg += "print/write function."
+        msg += "file object (io.IOBase class)."
         raise RuntimeError(msg)
-    return writer_in, closing_in
+    writer_out = write_obj(writer_call, closer_call)
+    return writer_out
     
 
 def write_param_summary(p, dp, loss_opt, dloss, pname_list, symbols, 
                         writer='stdout', ID='#OPTIMIZED', close_after=False):
     nAtoms = len(symbols)
-    writer, close_after = get_writer(writer, close_after)
+    writer = get_writer(writer)
     writer(ID+'\n')
     if (0.01 <= abs(dloss) < 10.):
         dlstr = '({0: 5.2f})'.format(dloss)
@@ -417,13 +431,12 @@ def write_param_summary(p, dp, loss_opt, dloss, pname_list, symbols,
         pstr  = ' {0:<12s}: '.format(pname)
         pstr += ''.join(['{0: 9.4f}  '.format(dp[i,j]) for j in range(nAtoms)])
         writer(pstr[:-2]+'\n')
-    if close_after:
-        if hasattr(writer, 'close'): writer.close()
+    if close_after: writer.close()
     return
 
     
 def write_gradient_summary(gradL, symbols, pname_list, writer='stdout', close_after=False):
-    writer, close_after = get_writer(writer, close_after)
+    writer = get_writer(writer)
     writer('---------------------------------------\n')
     writer('#DLOSS_DPARAM: Gradient of current loss\n')
     sstr  = '                  '
@@ -435,9 +448,15 @@ def write_gradient_summary(gradL, symbols, pname_list, writer='stdout', close_af
         writer(gstr[:-2]+'\n')
     gradL = gradL.flatten()
     i = np.argmax(np.abs(gradL))
-    writer('#MAX_GRAD: Maximum (absolute) component of loss gradient\n')
-    writer('{0: 5.2e}  '.format(gradL[i]))
-    if close_after and hasattr(writer, 'close'): writer.close()
+    nA = np.size(symbols)
+    max_par = pname_list[i//nA]
+    max_at  = i%nA
+    max_elm = symbols[max_at]
+    writer('---------------------------------------\n')
+    writer('#MAX_GRAD: Component of loss gradient with max. abs. value\n')
+    writer(' {0:<12s} for Atom {1: 3d} ({2:>2s}):'.format(max_par,max_at,max_elm))
+    writer('  {0: 5.2e}  \n'.format(gradL[i]))
+    if close_after: writer.close()
     return
 
 

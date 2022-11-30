@@ -344,11 +344,6 @@ def get_ordered_args(func, **kwargs):
    
 def post_process_result(p, p_init, loss_func, nAtoms, unit_cube=False, 
                         bounds=None, jac=None):
-    ## estimate gradient wrt input p (on whatever scale input is!)
-    if callable(jac):
-        gradL = jac(p)
-    else:
-        gradL = approx_fprime(p, loss_func)
     loss_init = loss_func(p_init)
     if type(loss_init) in [np.ndarray, list]:
         if np.size(loss_init) == 1: loss_init = float(loss_init)
@@ -356,15 +351,27 @@ def post_process_result(p, p_init, loss_func, nAtoms, unit_cube=False,
     if type(loss_opt) in [np.ndarray, list]:
         if np.size(loss_opt) == 1: loss_opt = float(loss_opt)
     dloss = loss_opt - loss_init
+    ## get gradient wrt input p (on whatever scale p is!)
+    if callable(jac):
+        gradL = jac(p)
+    else:
+        gradL = approx_fprime(p, loss_func)
     if unit_cube:
+        ## output properties in original space (not for unit cube)
         p_init = scale_from_unit_cube(p_init, bounds)
         p = scale_from_unit_cube(p, bounds)
-        ## if input p is on unit cube scale, `loss_func` contains
-        ## an additional `scale_from_unit_cube`, which is reflected
-        ## in the numerical gradient.
-        ## Thus, we need to do the *inverse* operation here.
-        ## (equivalent to remapping p before taking the FD gradient)
-        gradL = scale_to_unit_cube(gradL, bounds, for_gradient=True)
+        if callable(jac):
+            ## Jacobian has to be defined for unit cube (i.e., mapping to
+            ## unit cube is not part of the gradient - contrary to below)
+            gradL = scale_from_unit_cube(gradL, bounds, for_gradient=True)
+        else:
+            ## if input p is on unit cube scale, `loss_func` contains
+            ## an initial `scale_from_unit_cube`, which is reflected
+            ## in the FD gradient, but shouldn't enter the final gradient.
+            ## Thus, we need to do the *inverse* operation here.
+            ## (equivalent to remapping p and `loss_func` and then taking
+            ##  the FD gradient)
+            gradL = scale_to_unit_cube(gradL, bounds, for_gradient=True)
     p_ref = np.reshape(p_init,(-1,nAtoms))
     p_opt = np.reshape(p,(-1,nAtoms))
     dp = p_opt - p_ref

@@ -163,8 +163,8 @@ class pyseqm_orderator:
             if type(arg) in [np.ndarray, torch.Tensor]:
                 arg = arg.tolist()
             s_arg = [arg[j] for j in self.sortidx]
-            rest.append( torch.as_tensor(s_arg, device=device) )
-        return Z, xyz, *args
+            rest.append( s_arg )
+        return Z, xyz, *rest
     
     def reorder_output(self, output, *args):
         """
@@ -378,6 +378,14 @@ def post_process_result(p, p_init, loss_func, nAtoms, unit_cube=False,
     gradL = np.reshape(gradL,(-1,nAtoms))
     return p_opt, dp, gradL, loss_opt, dloss
     
+
+class Logger(object):
+    from sys import stdout
+    def __init__(self, filename=None):
+        self.out = stdout if filename is None else open(filename, "a")
+    def write(self, message): self.out.write(message)
+    def __getattr__(self, attr): return getattr(stdout, attr)
+    def flush(self): self.out.flush()
 
 class write_obj:
     def __init__(self, writer, closer):

@@ -193,6 +193,8 @@ class pyseqm_orderator:
 
         """
         if isinstance(axis, int): axis = [axis,]*(1+len(args))
+        if type(output) is torch.Tensor:
+            output = output.detach().numpy()
         c = [j for j in range(len(np.shape(output)))]
         c[0] = axis[0]
         c[axis[0]] = 0
@@ -201,6 +203,7 @@ class pyseqm_orderator:
         soutput = np.transpose(soutput,c)
         rest = []
         for i, arg in enumerate(args):
+            if type(arg) is torch.Tensor: arg = arg.detach().numpy()
             my_ax = axis[i+1]
             c = [j for j in range(len(np.shape(arg)))]
             c[0] = my_ax

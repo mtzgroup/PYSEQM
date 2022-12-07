@@ -142,7 +142,7 @@ class pyseqm_orderator:
         if isinstance(self.coordinates, np.ndarray):
             self.coordinates = self.coordinates.tolist()
     
-    def prepare_input(self, *args):
+    def prepare_input(self, *args, axis=0):
         """
         Prepare structural input for pyseqm calculation.
         
@@ -152,43 +152,63 @@ class pyseqm_orderator:
             atomic numbers in descending order
         coordinates : ndarray, shape (nAtoms,3)
             atomic positions according to species output
-        any array provided in args ordered according to new atom ordering
+        any array provided in args ordered according to new atom 
+            ordering (sorted along `axis`)
         """
         Z = [self.species[i] for i in self.sortidx]
         Z = torch.as_tensor([Z], dtype=torch.int64, device=device)
         xyz = [self.coordinates[i] for i in self.sortidx]
         xyz = torch.as_tensor([xyz], device=device)
         rest = []
-        for arg in args:
+        if isinstance(axis, int): axis = [axis,]*len(args)
+        for i, arg in enumerate(args):
             if type(arg) in [np.ndarray, torch.Tensor]:
                 arg = arg.tolist()
-            s_arg = [arg[j] for j in self.sortidx]
-            rest.append( s_arg )
+            my_ax = axis[i]
+            c = [j for j in range(len(np.shape(arg)))]
+            c[0] = my_ax
+            c[my_ax] = 0
+            sarg = np.transpose(arg, c)
+            sargs = [sarg[j] for j in self.reverse]
+            rest.append( np.transpose(sarg,c) )
         return Z, xyz, *rest
     
-    def reorder_output(self, output, *args):
+    def reorder_output(self, output, *args, axis=0):
         """
         Restores ordering of any provided array according to original atom ordering
         
         Parameters
         ----------
-        output : ndarray, shape (nAtoms, ...)
-            array of atomic property obtained from pyseqm calculation
-        any number of arrays to be reordered
+        args : ndarray, shape (nAtoms, ...)
+            arrays of atomic property obtained from pyseqm calculation
+            to be reordered
+        axis : int / array-like
+            axis along which to reorder arrays
+            (int: same for all, array: one axis per array)
                 
         Returns
         -------
-        output : ndarray, shape (nAtoms, ...)
+        new_args : ndarray, shape (nAtoms, ...)
             reordered input array according to original atom ordering
-        any array provided in args re-ordered according to original atom ordering
 
         """
-        output = output[self.reverse]
-        if len(args)>0:
-            new_args = []
-            for arg in args: new_args.append( arg[self.reverse] )
-            return output, *new_args
-        return output
+        if isinstance(axis, int): axis = [axis,]*(1+len(args))
+        c = [j for j in range(len(np.shape(output)))]
+        c[0] = axis[0]
+        c[axis[0]] = 0
+        soutput = np.transpose(output,c)
+        soutput = [soutput[j] for j in self.reverse]
+        soutput = np.transpose(soutput,c)
+        rest = []
+        for i, arg in enumerate(args):
+            my_ax = axis[i+1]
+            c = [j for j in range(len(np.shape(arg)))]
+            c[0] = my_ax
+            c[my_ax] = 0
+            sarg = np.transpose(arg, c)
+            sarg = [sarg[j] for j in self.reverse]
+            rest.append( np.transpose(sarg,c) )
+        return soutput, *rest
         
 
 def get_energy_calculator(species, coordinates, custom_parameters=(), **kwargs):

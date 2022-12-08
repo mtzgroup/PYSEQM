@@ -168,9 +168,9 @@ class pyseqm_orderator:
             c = [j for j in range(len(np.shape(arg)))]
             c[0] = my_ax
             c[my_ax] = 0
-            sarg = np.transpose(arg, c)
-            sargs = [sarg[j] for j in self.reverse]
-            rest.append( np.transpose(sarg,c) )
+            arg_t = np.transpose(arg, c)
+            arg_s = [arg_t[j] for j in self.sortidx]
+            rest.append( np.transpose(arg_s,c) )
         return Z, xyz, *rest
     
     def reorder_output(self, output, *args, axis=0):

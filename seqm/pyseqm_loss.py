@@ -2,12 +2,13 @@ import numpy as np
 import torch
 from functools import lru_cache
 from torch.autograd import grad as agrad
-from seqm.basics import Parser, Energy
+from seqm.basics import Parser, Energy, Force
 from seqm.seqm_functions.constants import Constants
 from seqm.pyseqm_helpers import get_ordered_args, scale_from_unit_cube, \
                                 scale_to_unit_cube
 
-MAX_CACHE_SIZE=0
+MAX_CACHE_SIZE = 0
+NUM_GRAD_EPS = 1e-7
 LFAIL = torch.tensor(torch.inf)
 
 
@@ -128,7 +129,6 @@ class PyseqmContainer:
         self.seqm_result = None
     
 
-@lru_cache(maxsize=MAX_CACHE_SIZE)
 def run_calculation(p, coordinates=None, species=None, custom_params=(),
                     setting_keys=(), setting_vals=()):
     """
@@ -190,21 +190,67 @@ def run_calculation(p, coordinates=None, species=None, custom_params=(),
     calculator = Energy(settings).to(device)
     
     try:  # calculation might fail for random choice of parameters
-            # Eat, E, Eel, Enuc, Eiso, EnucAB, orb_eigs, P, q, gap, fail
+            # Eat, E, Eel, Enuc, Eiso, EnucAB, orb_eigs, P, q, gap, F, fail
         res = calculator(const, coordinates, species, learnedpar, all_terms=True)
         parser = Parser(calculator.seqm_parameters)
         n_occ = parser(const, species, coordinates)[4]
         homo, lumo = n_occ - 1, n_occ
         orb_eigs = res[6][0]
         gap = orb_eigs[lumo] - orb_eigs[homo]
-        res = [*res[:-1], gap, res[-1]]
+        F = -agrad(res[1], coordinates, create_graph=True)[0][0]
+        res = [*res[:-1], gap, F, res[-1]]
     except RuntimeError:
-        res = torch.tensor([torch.nan,]*11)
+        res = torch.tensor([torch.nan,]*12)
         res[-1] = True
     return p, coordinates, res
     
 def clear_results_cache(): run_calculation.cache_clear()
 
+
+
+def num_grad_calc(p, coordinates=None, species=None, custom_params=(),
+             setting_keys=(), setting_vals=()):
+    n_p = p.shape[0]
+    n_ptypes = len(custom_params)
+    p_grid = p.repeat(n_p+1).reshape((n_p,-1)).transpose()
+    p_grid = torch.tensor(p_grid, device=device, requires_grad=False)
+    for i in range(n_p): p_grid[i,i] += NUM_GRAD_EPS
+    s = species.clone().expand(n_p+1,-1)
+    c = coordinates.clone().expand(n_p+1,-1,-1)
+    c.requires_grad_(True)
+    p_grid = p_grid.reshape((n_p+1,n_ptypes,-1)).transpose(1,0)
+    
+    # create dictionary of custom parameters
+    learnedpar = {pname:p_grid[i].flatten() for i, pname in enumerate(custom_params)}
+    settings = dict(zip(setting_keys, setting_vals))
+    const = Constants().to(device)
+    calculator = Energy(settings).to(device)
+#    calculator = Force(settings).to(device)
+    
+#    try:  # calculation might fail for random choice of parameters
+    res = calculator(const, c, s, learnedpar, all_terms=True)
+    parser = Parser(calculator.seqm_parameters)
+    n_occ = parser(const, s, c)[4][0]
+    homo, lumo = n_occ - 1, n_occ
+    orb_eigs = res[6]
+    gaps = orb_eigs[:,lumo] - orb_eigs[:,homo]
+#   # 0    1  2    3     4     5       6     7       8     9    10 11
+#   # Eat, E, Eel, Enuc, Eiso, EnucAB, eigs, P,      q,    gap, F, fail
+#   # F,   P, E,   Eat,  Eel,  Enuc,   Eiso, EnucAB, eigs, q,   fail
+#    res = [res[3], res[2], res[4], res[5], res[6], res[7], res[8], 
+#           res[1], res[9], gap, res[0], res[-1]]
+    F = -agrad(res[0].sum(), c)[0]
+    res = [*res[:-1], gaps, F, res[-1]]
+    props, grads = [], []
+    for r in res[:-1]:
+        props.append(r[-1])
+        grads.append( (r[:-1] - r[-1]) / NUM_GRAD_EPS )
+    res = [props, grads, any(res[-1])]
+#    except RuntimeError:
+#        nans = torch.tensor([torch.nan,]*11)
+#        res = [nans, nans, True]
+    return torch.tensor(p), coordinates, res
+    
 
 def energy_loss(p, popt_list=(), coordinates=None, species=None, 
                 seqm_settings={}, Eref=0.):#, cache_container=None):
@@ -281,6 +327,28 @@ def energy_loss_jac(p, popt_list=(), coordinates=None, species=None,
     dE_dp = agrad(E, p, retain_graph=True)[0]
     dE_dp = dE_dp.flatten()
     dL_dp = deltaE * dE_dp / species.shape[0]
+    return 2.0 * dL_dp
+    
+
+def energy_loss_numjac(p, popt_list=(), coordinates=None, species=None,
+                    seqm_settings={}, Eref=0.):#, cache_container=None):
+    """
+    Numerical gradient of square loss in energy per atom
+    """
+    seqm_keys = tuple(seqm_settings.keys())
+    seqm_vals = tuple(seqm_settings.values())
+    p, coordinates, res = num_grad_calc(p,
+                                        coordinates=coordinates,
+                                        species=species,
+                                        custom_params=popt_list,
+                                        setting_keys=seqm_keys,
+                                        setting_vals=seqm_vals)
+    E, dE_dp, SCFfail = res[0][1], res[1][1], res[-1]
+    if SCFfail:
+        dummy = p.clone().detach()
+        return torch.inf*torch.sign(dummy).flatten()
+    deltaE = E - Eref
+    dL_dp = deltaE * dE_dp.flatten() / species.shape[0]
     return 2.0 * dL_dp
     
 
@@ -362,6 +430,28 @@ def atomization_loss_jac(p, popt_list=(), coordinates=None, species=None,
     dL_dp = deltaE * dE_dp / species.shape[0]
     return 2.0 * dL_dp
     
+def atomization_loss_numjac(p, popt_list=(), coordinates=None, species=None,
+                         seqm_settings={}, Eref=0.):#, cache_container=None):
+    """
+    Numerical gradient of square loss in atomiyation energy per atom
+    """
+    seqm_keys = tuple(seqm_settings.keys())
+    seqm_vals = tuple(seqm_settings.values())
+    p, coordinates, res = num_grad_calc(p,
+                                        coordinates=coordinates,
+                                        species=species,
+                                        custom_params=popt_list,
+                                        setting_keys=seqm_keys,
+                                        setting_vals=seqm_vals)
+    Eat, dE_dp, SCFfail = res[0][0], res[1][0], res[-1]
+    if SCFfail:
+        dummy = p.clone().detach()
+        return torch.inf*torch.sign(dummy).flatten()
+    deltaE = Eat - Eref
+    dL_dp = deltaE * dE_dp.flatten() / species.shape[0]
+    return 2.0 * dL_dp
+    
+
 def forces_loss(p, popt_list=(), coordinates=None, species=None, 
                 seqm_settings={}, Fref=None):#, cache_container=None):
     """
@@ -404,11 +494,10 @@ def forces_loss(p, popt_list=(), coordinates=None, species=None,
                                           custom_params=popt_list,
                                           setting_keys=seqm_keys,
                                           setting_vals=seqm_vals)
-    E, SCFfail = res[1], res[-1] 
+    F, SCFfail = res[10], res[-1] 
     if SCFfail:
         FFAIL = torch.inf * torch.ones_like(coordinates)
         return LFAIL, FFAIL
-    F = -agrad(E, coordinates, retain_graph=True)[0][0]
     F = F - torch.sum(F, dim=0)  # remove COM force
     L = torch.square(F - Fref).sum() / species.shape[0]
     return L, F
@@ -444,11 +533,10 @@ def forces_loss_jac(p, popt_list=(), coordinates=None, species=None,
                                           custom_params=popt_list,
                                           setting_keys=seqm_keys,
                                           setting_vals=seqm_vals)
-    E, SCFfail = res[1], res[-1] 
+    F, SCFfail = res[10], res[-1] 
     if SCFfail:
         dummy = p.clone().detach()
         return torch.inf*torch.sign(dummy).flatten()
-    F = -agrad(E, coordinates, create_graph=True)[0][0]
     F = F - torch.sum(F, dim=0)  # remove COM force
     L = torch.square(F - Fref).sum()
     dL_dp = agrad(L, p, retain_graph=True)[0] / species.shape[0]
@@ -464,6 +552,32 @@ def forces_loss_jac(p, popt_list=(), coordinates=None, species=None,
 #        grad_prod_sum = grad_prod.sum()
 #        dLf_dp[i] = dLf_dp[i] + grad_prod_sum
 #    return 2.0 * dL_dp.detach().numpy()
+    
+
+def forces_loss_numjac(p, popt_list=(), coordinates=None, species=None,
+                    seqm_settings={}, Fref=0.):#, cache_container=None):
+    """
+    Numerical gradient of square loss in atomiyation energy per atom
+    """
+    Fref = torch.as_tensor(Fref, device=device)
+    seqm_keys = tuple(seqm_settings.keys())
+    seqm_vals = tuple(seqm_settings.values())
+    p, coordinates, res = num_grad_calc(p,
+                                        coordinates=coordinates,
+                                        species=species,
+                                        custom_params=popt_list,
+                                        setting_keys=seqm_keys,
+                                        setting_vals=seqm_vals)
+    F, dF_dp, SCFfail = res[0][10], res[1][10], res[-1]
+    if SCFfail:
+        dummy = p.clone().detach()
+        return torch.inf*torch.sign(dummy).flatten()
+    deltaF = F - Fref
+    dL_dp = torch.zeros_like(p)
+    for k in range(p.shape[0]):
+        dL_dp[k] = (dF_dp[k] * deltaF).sum()
+    dL_dp = dL_dp.flatten() / species.shape[0]
+    return 2.0 * dL_dp
     
 
 def gap_loss(p, popt_list=(), coordinates=None, species=None, 
@@ -542,6 +656,27 @@ def gap_loss_jac(p, popt_list=(), coordinates=None, species=None,
     with torch.autograd.set_detect_anomaly(True):
         dL_dp = agrad(L, p, retain_graph=True)[0]
     return dL_dp.flatten()
+    
+def gap_loss_numjac(p, popt_list=(), coordinates=None, species=None,
+                 seqm_settings={}, gap_ref=0.):#, cache_container=None):
+    """
+    Numerical gradient of square loss in HOO-LUMO gap
+    """
+    seqm_keys = tuple(seqm_settings.keys())
+    seqm_vals = tuple(seqm_settings.values())
+    p, coordinates, res = num_grad_calc(p,
+                                        coordinates=coordinates,
+                                        species=species,
+                                        custom_params=popt_list,
+                                        setting_keys=seqm_keys,
+                                        setting_vals=seqm_vals)
+    gap, dG_dp, SCFfail = res[0][9], res[1][9], res[-1]
+    if SCFfail:
+        dummy = p.clone().detach()
+        return torch.inf*torch.sign(dummy).flatten()
+    deltaG = gap - gap_ref
+    dL_dp = deltaG * dG_dp.flatten()
+    return 2.0 * dL_dp
     
 
 class LossConstructor:
@@ -622,6 +757,19 @@ class LossConstructor:
         if self.unit_cube: self.dLdp = scale_to_unit_cube(self.dLdp, 
                                         self.bounds, for_gradient=True)
         return self.dLdp
+    
+    def num_jac(self, p, *args, **kwargs):
+        if self.unit_cube: p = scale_from_unit_cube(p, self.bounds)
+        self.dLdp = np.zeros_like(p)
+        for prop in self.include:
+            dLdp_i = eval(prop+'_loss_numjac(p, *self.'+prop+'_args)')
+            dLdp_i = dLdp_i.detach().numpy()
+            exec('self.'+prop+'_loss_grad = dLdp_i')
+            self.dLdp += eval('self.weight_'+prop+' * dLdp_i')
+        if self.unit_cube: self.dLdp = scale_to_unit_cube(self.dLdp,
+                                        self.bounds, for_gradient=True)
+        return self.dLdp
+        
     
     def add_loss(self, prop, weight=1., **kwargs):
         """

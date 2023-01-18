@@ -1,6 +1,7 @@
 import numpy as np
 import torch
 from functools import lru_cache
+from warnings import warn
 from torch.autograd import grad as agrad
 from seqm.basics import Parser, Energy, Force
 from seqm.seqm_functions.constants import Constants
@@ -129,6 +130,7 @@ class PyseqmContainer:
         self.seqm_result = None
     
 
+@lru_cache(maxsize=24,typed=True)
 def run_calculation(p, coordinates=None, species=None, custom_params=(),
                     setting_keys=(), setting_vals=()):
     """
@@ -225,20 +227,13 @@ def num_grad_calc(p, coordinates=None, species=None, custom_params=(),
     settings = dict(zip(setting_keys, setting_vals))
     const = Constants().to(device)
     calculator = Energy(settings).to(device)
-#    calculator = Force(settings).to(device)
     
-#    try:  # calculation might fail for random choice of parameters
     res = calculator(const, c, s, learnedpar, all_terms=True)
     parser = Parser(calculator.seqm_parameters)
     n_occ = parser(const, s, c)[4][0]
     homo, lumo = n_occ - 1, n_occ
     orb_eigs = res[6]
     gaps = orb_eigs[:,lumo] - orb_eigs[:,homo]
-#   # 0    1  2    3     4     5       6     7       8     9    10 11
-#   # Eat, E, Eel, Enuc, Eiso, EnucAB, eigs, P,      q,    gap, F, fail
-#   # F,   P, E,   Eat,  Eel,  Enuc,   Eiso, EnucAB, eigs, q,   fail
-#    res = [res[3], res[2], res[4], res[5], res[6], res[7], res[8], 
-#           res[1], res[9], gap, res[0], res[-1]]
     F = -agrad(res[0].sum(), c)[0]
     res = [*res[:-1], gaps, F, res[-1]]
     props, grads = [], []
@@ -246,9 +241,6 @@ def num_grad_calc(p, coordinates=None, species=None, custom_params=(),
         props.append(r[-1])
         grads.append( (r[:-1] - r[-1]) / NUM_GRAD_EPS )
     res = [props, grads, any(res[-1])]
-#    except RuntimeError:
-#        nans = torch.tensor([torch.nan,]*11)
-#        res = [nans, nans, True]
     return torch.tensor(p), coordinates, res
     
 
@@ -714,23 +706,27 @@ class LossConstructor:
         kwargs.update({'popt_list':popt_list,'coordinates':coordinates,
                        'species':species})
         self.general_kwargs = kwargs
+        run_calculation.cache_clear()
     
     def __call__(self, p, *args, **kwargs):
         if self.unit_cube: p = scale_from_unit_cube(p, self.bounds)
         p = torch.tensor(p, device=device)
         self.L = 0.
+        run_calculation.cache_clear()
         for prop in self.include:
             L_i, p_i = eval(prop+'_loss(p, *self.'+prop+'_args)')
             L_i = L_i.item()
             exec('self.'+prop+'_loss_val = L_i')
             self.L += eval('self.weight_'+prop+' * L_i')
             exec('self.'+prop+'_val = p_i.detach().numpy()')
+        run_calculation.cache_clear()
         return self.L
     
     def loss_and_jac(self, p, *args, **kwargs):
         if self.unit_cube: p = scale_from_unit_cube(p, self.bounds)
         p = torch.tensor(p, device=device)
         self.L, self.dLdp = 0., np.zeros_like(p)
+        run_calculation.cache_clear()
         for prop in self.include:
             L_i, p_i = eval(prop+'_loss(p, *self.'+prop+'_args)')
             L_i = L_i.item()
@@ -743,12 +739,14 @@ class LossConstructor:
             self.dLdp += eval('self.weight_'+prop+' * dLdp_i')
         if self.unit_cube: self.dLdp = scale_to_unit_cube(self.dLdp, 
                                         self.bounds, for_gradient=True)
+        run_calculation.cache_clear()
         return (self.L, self.dLdp)
     
     def jac(self, p, *args, **kwargs):
         if self.unit_cube: p = scale_from_unit_cube(p, self.bounds)
         p = torch.tensor(p, device=device)
         self.dLdp = np.zeros_like(p)
+        run_calculation.cache_clear()
         for prop in self.include:
             dLdp_i = eval(prop+'_loss_jac(p, *self.'+prop+'_args)')
             dLdp_i = dLdp_i.detach().numpy()
@@ -756,11 +754,13 @@ class LossConstructor:
             self.dLdp += eval('self.weight_'+prop+' * dLdp_i')
         if self.unit_cube: self.dLdp = scale_to_unit_cube(self.dLdp, 
                                         self.bounds, for_gradient=True)
+        run_calculation.cache_clear()
         return self.dLdp
     
     def num_jac(self, p, *args, **kwargs):
         if self.unit_cube: p = scale_from_unit_cube(p, self.bounds)
         self.dLdp = np.zeros_like(p)
+        run_calculation.cache_clear()
         for prop in self.include:
             dLdp_i = eval(prop+'_loss_numjac(p, *self.'+prop+'_args)')
             dLdp_i = dLdp_i.detach().numpy()
@@ -768,6 +768,7 @@ class LossConstructor:
             self.dLdp += eval('self.weight_'+prop+' * dLdp_i')
         if self.unit_cube: self.dLdp = scale_to_unit_cube(self.dLdp,
                                         self.bounds, for_gradient=True)
+        run_calculation.cache_clear()
         return self.dLdp
         
     
@@ -782,6 +783,12 @@ class LossConstructor:
             msg += "' implemented for loss. Check for typos or write "
             msg += "coresponding loss function for '"+prop+"'."
             raise ValueError(msg)
+        if prop == 'gap':
+            msg  = 'HOMO-LUMO gap explicitly depends on eigenvalues. '
+            msg += 'These might have derivative discontinuities w.r.t. '
+            msg += 'SEQM parameters (MOs crossing) -> unlikely, but '
+            msg += 'possible instabilities in autograd!'
+            warn(msg)
         self.include.append(prop)
         exec('self.weight_'+prop+' = weight')
         kwargs.update(self.general_kwargs)

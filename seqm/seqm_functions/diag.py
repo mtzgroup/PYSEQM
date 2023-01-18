@@ -1,16 +1,21 @@
 import torch
 from .pack import *
-from xitorch import LinearOperator
-from xitorch.linalg import symeig as xieig
-#this pseudo_diag is not efficient to be implemented in python
-#as it applies a series Jacobi transformation on eigenvectors (in place operations)
-#have to use python for loop
 
 CHECK_DEGENERACY = False
 # flag to control whether consider degeneracy when constructing the density matrix
 # if no, then occupied orbitals are from 0, 1, ..., nocc-1
 # if yes, then equal contributions are used for degenarated orbitals near fermi level
 
+DEGEN_EIGENSOLVER = True
+# flag whether or not to use eigensolver that's differentiable for degenerate
+# eigenpairs (new implementation)
+DEGEN_THRESHOLD = torch.finfo(torch.float).eps ** 0.6
+# threshold below which to consider eigenpairs degenerate
+
+
+#this pseudo_diag is not efficient to be implemented in python
+#as it applies a series Jacobi transformation on eigenvectors (in place operations)
+#have to use python for loop
 def pseudo_diag(x,C,E,nheavyatom,nH,nocc):
     #x single Fock matrix
     #here x has padding 0, but is symmetric, i.e. lower and upper trianlge parts are filled
@@ -103,10 +108,14 @@ def construct_P(e, v, nocc):
 
 def sym_eig_trunc(x,nheavyatom,nH,nocc, eig_only=False):
 
+    ##NOTE UPLO='U' doesn't seem to matter in torch.linalg.eigh!!!
+    sym_eigh = degen_symeig.apply if DEGEN_EIGENSOLVER else torch.linalg.eigh
+
     dtype =  x.dtype
     device = x.device
     if x.dim()==2:
-        e0, v = torch.linalg.eigh(pack(x, nheavyatom, nH), UPLO='U')
+        e0, v = sym_eigh(pack(x, nheavyatom, nH))
+#        e0, v = torch.linalg.eigh(pack(x, nheavyatom, nH), UPLO='U')
 #        e0,v = torch.symeig(pack(x, nheavyatom, nH),eigenvectors=True,upper=True)
         e = torch.zeros((x.shape[0]),dtype=dtype,device=device)
         e[:(nheavyatom*4+nH)] = e0
@@ -130,22 +139,22 @@ def sym_eig_trunc(x,nheavyatom,nH,nocc, eig_only=False):
         for i in range(nmol):
             if cond[i]:
                 x0[i,ind[norb[i]:], ind[norb[i]:]] = mutipler[:pnorb[i]]*dE[i]+hN[i]
-        try:
-            e0, v = torch.linalg.eigh(x0, UPLO='U')
+#        try: #MS: this try-except structure doesn't make sense, does it?
+        e0, v = sym_eigh(x0)
+#            e0, v = torch.linalg.eigh(x0, UPLO='U')
 #            e0,v = torch.symeig(x0,eigenvectors=True,upper=True)
-        except:
-            if torch.isnan(x0).any(): print(x0)
-            #print(x0.detach().data.numpy())
-            e0, v = torch.linalg.eigh(x0, UPLO='U')
+#        except:
+#            if torch.isnan(x0).any(): print(x0)
+#            #print(x0.detach().data.numpy())
+#            e0, v = sym_eigh(x0)
+#            e0, v = torch.linalg.eigh(x0, UPLO='U')
 #            e0,v = torch.symeig(x0,eigenvectors=True,upper=True)
         e = torch.zeros((nmol, x.shape[-1]),dtype=dtype,device=device)
         e[...,:size] = e0
         for i in range(nmol):
-            if cond[i]:
-                e[i,norb[i]:size] = 0.0
+            if cond[i]: e[i,norb[i]:size] = 0.0
 
-    if eig_only:
-        return e, v
+    if eig_only: return e, v
 
     # each column of v is a eigenvectors
     # P_alpha_beta = 2.0 * |sum_i c_{i,alpha}*c_{i,beta}, i \in occupied MO
@@ -170,15 +179,19 @@ def sym_eig_trunc(x,nheavyatom,nH,nocc, eig_only=False):
             t = 2.0*torch.stack(list(map(lambda a,n : torch.matmul(a[:,:n], a[:,:n].transpose(0,1)), v, nocc)))
     P = unpack(t, nheavyatom, nH, x.shape[-1])
 
-    return e,P, v
+    return e, P, v
 
 
 def sym_eig_trunc1(x,nheavyatom,nH,nocc, eig_only=False):
-
+    
+    ##NOTE UPLO='U' doesn't seem to matter in torch.linalg.eigh!!!
+    sym_eigh = degen_symeig.apply if DEGEN_EIGENSOLVER else torch.linalg.eigh
+    
     dtype =  x.dtype
     device = x.device
     if x.dim()==2:
-        e0, v = torch.linalg.eigh(pack(x, nheavyatom, nH), UPLO='U')
+        e0, v = sym_eigh(pack(x, nheavyatom, nH))
+#        e0, v = torch.linalg.eigh(pack(x, nheavyatom, nH), UPLO='U')
 #        e0,v = torch.symeig(pack(x, nheavyatom, nH),eigenvectors=True,upper=True)
         e = torch.zeros((x.shape[0]),dtype=dtype,device=device)
         e[:(nheavyatom*4+nH)] = e0
@@ -186,7 +199,8 @@ def sym_eig_trunc1(x,nheavyatom,nH,nocc, eig_only=False):
         #Gershgorin circle theorem estimate upper bounds of eigenvalues
 
         e0, v0 = list(zip(*list(map(
-                         lambda a,b,c: torch.linalg.eigh(pack(a,b,c), UPLO='U'),
+                        lambda a,b,c: sym_eigh(pack(a,b,c)),
+#                        lambda a,b,c: torch.linalg.eigh(pack(a,b,c), UPLO='U'),
 #                        lambda a,b,c: torch.symeig(pack(a,b,c),eigenvectors=True,upper=True),
                         x,nheavyatom, nH))))
         if CHECK_DEGENERACY:
@@ -205,121 +219,47 @@ def sym_eig_trunc1(x,nheavyatom,nH,nocc, eig_only=False):
         for i in range(nmol):
             e[i,:norb[i]] = e0[i]
             P[i] = unpack(P0[i], nheavyatom[i], nH[i], x.shape[-1])
-
-    if eig_only:
-        return e, v0
-
-    # each column of v is a eigenvectors
-    # P_alpha_beta = 2.0 * |sum_i c_{i,alpha}*c_{i,beta}, i \in occupied MO
-
-    return e,P, v0
-
-
-
-def xisym_eig_trunc(x,nheavyatom,nH,nocc, eig_only=False):
-
-    dtype =  x.dtype
-    device = x.device
-    x0 = pack(x, nheavyatom, nH)
-    if x.dim()==2:
-        A = LinearOperator.m(x0)
-        e0, v = xieig.symeig(A)
-        e = torch.zeros((x.shape[0]),dtype=dtype,device=device)
-        e[:(nheavyatom*4+nH)] = e0
-    else:#need to add large diagonal values to replace 0 padding
-        #Gershgorin circle theorem estimate upper bounds of eigenvalues
-        nmol, size, _ = x0.shape
-
-        aii = x0.diagonal(dim1=1,dim2=2)
-        ri = torch.sum(torch.abs(x0),dim=2)-torch.abs(aii)
-        hN = torch.max(aii+ri,dim=1)[0]
-        dE = hN - torch.min(aii-ri,dim=1)[0] #(maximal - minimal) get range
-
-        norb = nheavyatom*4+nH
-        pnorb = size - norb
-        nn = torch.max(pnorb).item()
-        dx = 0.005
-        mutipler = torch.arange(1.0+dx, 1.0+nn*dx+dx, dx, dtype=dtype, device=device)[:nn]
-        ind = torch.arange(size, dtype=torch.int64, device=device)
-        cond = pnorb>0
-        for i in range(nmol):
-            if cond[i]:
-                x0[i,ind[norb[i]:], ind[norb[i]:]] = mutipler[:pnorb[i]]*dE[i]+hN[i]
-        A = LinearOperator.m(x0)
-        try:
-            e0, v = xieig(A) 
-        except:
-            if torch.isnan(A.mat).any(): print(A.mat)
-            e0, v = xieig(A)
-        e = torch.zeros((nmol, x.shape[-1]), dtype=dtype,device=device)
-        e[...,:size] = e0
-        for i in range(nmol):
-            if cond[i]: e[i,norb[i]:size] = 0.0
-
-    if eig_only:
-        return e, v
     
-    # each column of v is a eigenvectors
-    # P_alpha_beta = 2.0 * |sum_i c_{i,alpha}*c_{i,beta}, i \in occupied MO
-    if x.dim()==2:
-        if CHECK_DEGENERACY:
-            t = construct_P(e, v, nocc)
-        else:
-            t = 2.0*torch.matmul(v[:,:nocc], v[:,:nocc].transpose(0,1))
-    else:
-        """
-        t = torch.zeros_like(v)
-        for i in range(v.shape[0]):
-            t[i] = torch.matmul(v[i,:,:nocc[i]], v[i, :,:nocc[i]].transpose(0,1))
-
-        t*=2.0
-        """
-        if CHECK_DEGENERACY:
-            t = torch.stack(list(map(lambda a,b,n : construct_P(a, b, n), e, v, nocc)))
-        else:
-            t = 2.0*torch.stack(list(map(lambda a,n : torch.matmul(a[:,:n], a[:,:n].transpose(0,1)), v, nocc)))
-    P = unpack(t, nheavyatom, nH, x.shape[-1])
-
-    return e, P, v
-
-
-def xisym_eig_trunc1(x,nheavyatom,nH,nocc, eig_only=False):
-
-    dtype =  x.dtype
-    device = x.device
-    if x.dim()==2:
-        A = LinearOperator.m(pack(x, nheavyatom, nH))
-        e0, v = xieig(A)
-        e = torch.zeros((x.shape[0]),dtype=dtype,device=device)
-        e[:(nheavyatom*4+nH)] = e0
-    else:#need to add large diagonal values to replace 0 padding
-        #Gershgorin circle theorem estimate upper bounds of eigenvalues
-
-        e0, v0 = list(zip(*list(map(
-                         lambda a,b,c: xieig(LinearOperator.m(pack(a,b,c))),
-                        x,nheavyatom, nH))))
-        if CHECK_DEGENERACY:
-            P0 = list(map(
-                     lambda e, v, nc : construct_P(e,v,nc),
-                     e0, v0,nocc))
-        else:
-            P0 = list(map(
-                     lambda v, nc : 2.0*torch.matmul(v[:,:nc], v[:,:nc].transpose(0,1)),
-                     v0,nocc))
-        #
-        nmol = x.shape[0]
-        norb = nheavyatom*4+nH
-        e=torch.zeros(x.shape[:2], dtype=dtype, device=device)
-        P = torch.zeros_like(x)
-        for i in range(nmol):
-            e[i,:norb[i]] = e0[i]
-            P[i] = unpack(P0[i], nheavyatom[i], nH[i], x.shape[-1])
-
-    if eig_only:
-        return e, v0
+    if eig_only: return e, v0
 
     # each column of v is a eigenvectors
     # P_alpha_beta = 2.0 * |sum_i c_{i,alpha}*c_{i,beta}, i \in occupied MO
 
     return e, P, v0
+
+
+
+## adapted from M.F. Kasim, arXiv:2011.04366 (2020) and https://github.com/xitorch/xitorch
+class degen_symeig(torch.autograd.Function):
+    @staticmethod
+    def forward(ctx, A):
+        eival, eivec = torch.linalg.eigh(A)
+        ctx.save_for_backward(eival, eivec)
+        return eival, eivec
+
+    @staticmethod
+    def backward(ctx, grad_eival, grad_eivec):
+        eival, eivec = ctx.saved_tensors
+        eivecT = eivec.transpose(-2, -1).conj()
+
+        # take the contribution from the eivec
+        if grad_eivec is not None:
+            delta = eival.unsqueeze(-2) - eival.unsqueeze(-1)
+            # remove the degenerate part
+            idx = torch.abs(delta) <= DEGEN_THRESHOLD
+            delta[idx] = torch.inf
+            delta_inv = delta.pow(-1)
+            d_delta = delta_inv * torch.matmul(eivecT, grad_eivec)
+            dA = torch.matmul(eivec, torch.matmul(d_delta, eivecT))
+        else:
+            dA = torch.zeros_like(eivec)
+        
+        # calculate the contribution from the eival
+        if grad_eival is not None:
+            dA = dA + torch.matmul(eivec, grad_eival.unsqueeze(-1) * eivecT)
+
+        # symmetrize to reduce numerical instability
+        dA = (dA + dA.transpose(-2, -1).conj()) * 0.5
+        return dA
+    
 

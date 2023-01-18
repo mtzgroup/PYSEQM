@@ -6,7 +6,6 @@ from .energy import elec_energy
 from .SP2 import SP2
 from .pack import *
 from .diag import sym_eig_trunc, sym_eig_trunc1
-from .diag import xisym_eig_trunc, xisym_eig_trunc1
 import warnings
 import time
 #from .check import check
@@ -27,8 +26,6 @@ RAISE_ERROR_IF_SCF_BACKWARD_FAILS = False
 RAISE_ERROR_IF_SCF_FORWARD_FAILS = False
 #if true, raise error rather than ignore those non-convered molecules
 
-DEGEN_EIGENSOLVER = True
-## use eigensolver differentiable for degenerate eigenvalues
 
 
 #use constant mixing
@@ -41,8 +38,6 @@ def scf_forward0(M, w, gss, gpp, gsp, gp2, hsp, \
     backward is for testing purpose, default is False
     if want to test scf backward directly through the loop in this function, turn backward to be True
     """
-    eigh_trunc = xisym_eig_trunc if DEGEN_EIGENSOLVER else sym_eig_trunc
-    eigh_trunc1 = xisym_eig_trunc1 if DEGEN_EIGENSOLVER else sym_eig_trunc1
     
     Pnew = torch.zeros_like(P)
     err = torch.ones(nmol, dtype=P.dtype, device=P.device)
@@ -57,8 +52,7 @@ def scf_forward0(M, w, gss, gpp, gsp, gp2, hsp, \
     while(1):
         if notconverged.any():
             if backward:
-#                Pnew[notconverged] = sym_eig_trunc1(F[notconverged],
-                Pnew[notconverged] = eigh_trunc1(F[notconverged],
+                Pnew[notconverged] = sym_eig_trunc1(F[notconverged],
                                             nHeavy[notconverged],
                                             nHydro[notconverged],
                                             nOccMO[notconverged])[1]
@@ -76,8 +70,7 @@ def scf_forward0(M, w, gss, gpp, gsp, gp2, hsp, \
                 Pnew[notconverged] = torch.stack(list(map(lambda x,nX,nH,nocc: sym_eig_trunc(x,nX,nH,nocc)[1], \
                               F[notconverged],nHeavy[notconverged], nHydro[notconverged], nOccMO[notconverged])))
                 """
-#                Pnew[notconverged] = sym_eig_trunc(F[notconverged],
-                Pnew[notconverged] = eigh_trunc(F[notconverged],
+                Pnew[notconverged] = sym_eig_trunc(F[notconverged],
                                             nHeavy[notconverged],
                                             nHydro[notconverged],
                                             nOccMO[notconverged])[1]
@@ -116,8 +109,6 @@ def scf_forward1(M, w, gss, gpp, gsp, gp2, hsp, \
     """
     adaptive mixing algorithm, see cnvg.f
     """
-    eigh_trunc = xisym_eig_trunc if DEGEN_EIGENSOLVER else sym_eig_trunc
-    eigh_trunc1 = xisym_eig_trunc1 if DEGEN_EIGENSOLVER else sym_eig_trunc1
     
     nDirect1 = 2
     notconverged = torch.ones(nmol,dtype=torch.bool, device=M.device)
@@ -136,8 +127,7 @@ def scf_forward1(M, w, gss, gpp, gsp, gp2, hsp, \
     for i in range(nDirect1):
         if notconverged.any():
             if backward:
-#                Pnew[notconverged] = sym_eig_trunc1(F[notconverged],
-                Pnew[notconverged] = eigh_trunc1(F[notconverged],
+                Pnew[notconverged] = sym_eig_trunc1(F[notconverged],
                                             nHeavy[notconverged],
                                             nHydro[notconverged],
                                             nOccMO[notconverged])[1]
@@ -154,8 +144,7 @@ def scf_forward1(M, w, gss, gpp, gsp, gp2, hsp, \
                 Pnew[notconverged] = torch.stack(list(map(lambda x,nX,nH,nocc: sym_eig_trunc(x,nX,nH,nocc)[1], \
                               F[notconverged],nHeavy[notconverged], nHydro[notconverged], nOccMO[notconverged])))
                 """
-#                Pnew[notconverged] = sym_eig_trunc(F[notconverged],
-                Pnew[notconverged] = eigh_trunc(F[notconverged],
+                Pnew[notconverged] = sym_eig_trunc(F[notconverged],
                                             nHeavy[notconverged],
                                             nHydro[notconverged],
                                             nOccMO[notconverged])[1]
@@ -186,8 +175,7 @@ def scf_forward1(M, w, gss, gpp, gsp, gp2, hsp, \
     while(1):
         if notconverged.any():
             if backward:
-#                Pnew[notconverged] = sym_eig_trunc1(F[notconverged],
-                Pnew[notconverged] = eigh_trunc1(F[notconverged],
+                Pnew[notconverged] = sym_eig_trunc1(F[notconverged],
                                             nHeavy[notconverged],
                                             nHydro[notconverged],
                                             nOccMO[notconverged])[1]
@@ -204,8 +192,7 @@ def scf_forward1(M, w, gss, gpp, gsp, gp2, hsp, \
                 Pnew[notconverged] = torch.stack(list(map(lambda x,nX,nH,nocc: sym_eig_trunc(x,nX,nH,nocc)[1], \
                               F[notconverged],nHeavy[notconverged], nHydro[notconverged], nOccMO[notconverged])))
                 """
-#                Pnew[notconverged] = sym_eig_trunc(F[notconverged],
-                Pnew[notconverged] = eigh_trunc(F[notconverged],
+                Pnew[notconverged] = sym_eig_trunc(F[notconverged],
                                             nHeavy[notconverged],
                                             nHydro[notconverged],
                                             nOccMO[notconverged])[1]
@@ -268,7 +255,6 @@ def scf_forward2(M, w, gss, gpp, gsp, gp2, hsp, \
     combine with pulay converger
     #check mopac for which P is stored: P constructed from fock subroutine, or P from pulay algorithm
     """
-    eigh_trunc = xisym_eig_trunc if DEGEN_EIGENSOLVER else sym_eig_trunc
     
     dtype=M.dtype
     device=M.device
@@ -332,8 +318,7 @@ def scf_forward2(M, w, gss, gpp, gsp, gp2, hsp, \
                 Pnew[notconverged] = torch.stack(list(map(lambda x,nX,nH,nocc: sym_eig_trunc(x,nX,nH,nocc)[1], \
                               F[notconverged],nHeavy[notconverged], nHydro[notconverged], nOccMO[notconverged])))
                 """
-#                Pnew[notconverged] = sym_eig_trunc(F[notconverged],
-                Pnew[notconverged] = eigh_trunc(F[notconverged],
+                Pnew[notconverged] = sym_eig_trunc(F[notconverged],
                                             nHeavy[notconverged],
                                             nHydro[notconverged],
                                             nOccMO[notconverged])[1]
@@ -382,8 +367,7 @@ def scf_forward2(M, w, gss, gpp, gsp, gp2, hsp, \
                 Pnew[notconverged] = torch.stack(list(map(lambda x,nX,nH,nocc: sym_eig_trunc(x,nX,nH,nocc)[1], \
                               F[notconverged],nHeavy[notconverged], nHydro[notconverged], nOccMO[notconverged])))
                 """
-#                Pnew[notconverged] = sym_eig_trunc(F[notconverged],
-                Pnew[notconverged] = eigh_trunc(F[notconverged],
+                Pnew[notconverged] = sym_eig_trunc(F[notconverged],
                                             nHeavy[notconverged],
                                             nHydro[notconverged],
                                             nOccMO[notconverged])[1]
@@ -447,8 +431,7 @@ def scf_forward2(M, w, gss, gpp, gsp, gp2, hsp, \
                 P[notconverged] = torch.stack(list(map(lambda x,nX,nH,nocc: sym_eig_trunc(x,nX,nH,nocc)[1], \
                               F[notconverged],nHeavy[notconverged], nHydro[notconverged], nOccMO[notconverged])))
                 """
-#                P[notconverged] = sym_eig_trunc(F[notconverged],
-                P[notconverged] = eigh_trunc(F[notconverged],
+                P[notconverged] = sym_eig_trunc(F[notconverged],
                                             nHeavy[notconverged],
                                             nHydro[notconverged],
                                             nOccMO[notconverged])[1]
@@ -494,8 +477,7 @@ def scf_forward2(M, w, gss, gpp, gsp, gp2, hsp, \
                 P[notconverged] = torch.stack(list(map(lambda x,nX,nH,nocc: sym_eig_trunc(x,nX,nH,nocc)[1], \
                               F[notconverged],nHeavy[notconverged], nHydro[notconverged], nOccMO[notconverged])))
                 """
-#                P[notconverged] = sym_eig_trunc(F[notconverged],
-                P[notconverged] = eigh_trunc(F[notconverged],
+                P[notconverged] = sym_eig_trunc(F[notconverged],
                                             nHeavy[notconverged],
                                             nHydro[notconverged],
                                             nOccMO[notconverged])[1]
@@ -536,9 +518,6 @@ class SCF(torch.autograd.Function):
     forward and backward
     check function scf_loop for details
     """
-    eigh_trunc = xisym_eig_trunc if DEGEN_EIGENSOLVER else sym_eig_trunc
-    eigh_trunc1 = xisym_eig_trunc1 if DEGEN_EIGENSOLVER else sym_eig_trunc1
-    
     sp2=[False]
     converger=[2]
     scf_backward_eps = 1.0e-2
@@ -580,6 +559,7 @@ class SCF(torch.autograd.Function):
     @staticmethod
     def backward(ctx, grad0, grad1):
         #use recursive formula
+        
         Pin, M, w, gss, gpp, gsp, gp2, hsp, \
         nHydro, nHeavy, nOccMO, \
         maskd, mask, idxi, idxj, eps, notconverged, \
@@ -603,8 +583,7 @@ class SCF(torch.autograd.Function):
             """
             Pout = torch.stack(list(map(lambda x,nX,nH,nocc: sym_eig_trunc(x,nX,nH,nocc)[1], F, nHeavy, nHydro, nOccMO)))
             """
-#            Pout = sym_eig_trunc1(F, nHeavy, nHydro, nOccMO)[1]
-            Pout = eigh_trunc1(F, nHeavy, nHydro, nOccMO)[1]
+            Pout = sym_eig_trunc1(F, nHeavy, nHydro, nOccMO)[1]
 
         k=0
         backward_eps = SCF.scf_backward_eps.to(Pin.device)
@@ -705,7 +684,7 @@ def scf_loop(const, molsize, \
     """
     device = xij.device
     #pp = paraemeters
-
+    
     nmol = nOccMO.shape[0]
     tore = const.tore
     if const.do_timing:
@@ -800,9 +779,6 @@ def scf_loop(const, molsize, \
     #
     #return Fock matrix, eigenvalues, density matrix, Hcore,  2 electron 2 center integrals, eigenvectors
     if eig:
-        eigh_trunc = xisym_eig_trunc if DEGEN_EIGENSOLVER else sym_eig_trunc
-        eigh_trunc1 = xisym_eig_trunc1 if DEGEN_EIGENSOLVER else sym_eig_trunc1
-    
         """
         e, v = list(zip(*list(map(
                         lambda x,nX,nH,nocc: sym_eig_trunc(x,nX,nH,nocc,eig_only=True),
@@ -810,11 +786,9 @@ def scf_loop(const, molsize, \
         e = torch.stack(e)
         """
         if scf_backward>=1:
-#            e, v = sym_eig_trunc1(F,nHeavy, nHydro, nOccMO,eig_only=True)
-            e, v = eigh_trunc1(F,nHeavy,nHydro,nOccMO,eig_only=True)
+            e, v = sym_eig_trunc1(F,nHeavy, nHydro, nOccMO,eig_only=True)
         else:
-#            e, v = sym_eig_trunc(F,nHeavy, nHydro, nOccMO,eig_only=True)
-            e, v = eigh_trunc(F,nHeavy,nHydro,nOccMO,eig_only=True)
+            e, v = sym_eig_trunc(F,nHeavy, nHydro, nOccMO,eig_only=True)
 
         #t1 = time.time()
         #print('Diag : %f sec' % (t1-t0))

@@ -242,24 +242,20 @@ class degen_symeig(torch.autograd.Function):
         eival, eivec = ctx.saved_tensors
         eivecT = eivec.transpose(-2, -1).conj()
 
-        # take the contribution from the eivec
-        if grad_eivec is not None:
-            delta = eival.unsqueeze(-2) - eival.unsqueeze(-1)
-            # remove the degenerate part
-            idx = torch.abs(delta) <= DEGEN_THRESHOLD
-            delta[idx] = torch.inf
-            delta_inv = delta.pow(-1)
-            d_delta = delta_inv * torch.matmul(eivecT, grad_eivec)
-            dA = torch.matmul(eivec, torch.matmul(d_delta, eivecT))
-        else:
-            dA = torch.zeros_like(eivec)
+        if grad_eivec is None: return torch.zeros_like(eivec)
         
-        # calculate the contribution from the eival
-        if grad_eival is not None:
-            dA = dA + torch.matmul(eivec, grad_eival.unsqueeze(-1) * eivecT)
-
+        # take the contribution from the eivec
+        delta = eival.unsqueeze(-2) - eival.unsqueeze(-1)
+        # remove the degenerate part
+        idx = torch.abs(delta) <= DEGEN_THRESHOLD
+        delta[idx] = torch.inf
+        delta_inv = delta.pow(-1)
+        d_delta = delta_inv * torch.matmul(eivecT, grad_eivec)
+        dA = torch.matmul(eivec, torch.matmul(d_delta, eivecT))
+        dA = dA + torch.matmul(eivec, grad_eival.unsqueeze(-1) * eivecT)
         # symmetrize to reduce numerical instability
         dA = (dA + dA.transpose(-2, -1).conj()) * 0.5
+
         return dA
     
 

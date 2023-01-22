@@ -374,24 +374,23 @@ class Force(torch.nn.Module):
             self.energy(const, coordinates, species, \
                 learned_parameters=learned_parameters, all_terms=True, P0=P0, step=step, *args, **kwargs)
         L = Hf.sum()
+        if const.do_timing: t0 = time.time()
         if mode=='new' and self.create_graph:
             gv = [coordinates]
-            gradients  = grad(L, gv,create_graph=self.create_graph)[0]
+            gradients = grad(L, gv, create_graph=self.create_graph)[0]
             force = -gradients.clone()
         else:
-            if const.do_timing: t0 = time.time()
             L.backward(create_graph=self.create_graph)
-            if const.do_timing:
-                if torch.cuda.is_available():
-                    torch.cuda.synchronize()
-                t1 = time.time()
-                const.timing["Force"].append(t1-t0)
             if self.create_graph:
                 force = -coordinates.grad.clone()
-                with torch.no_grad():
-                    coordinates.grad.zero_()
+                with torch.no_grad(): coordinates.grad.zero_()
             else:
                 force = -coordinates.grad.detach()
                 coordinates.grad.zero_()
-
+        
+        if const.do_timing:
+            if torch.cuda.is_available(): torch.cuda.synchronize()
+            t1 = time.time()
+            const.timing["Force"].append(t1-t0)
+        
         return force, P, Etot, Hf, Eelec, Enuc, Eiso, EnucAB, e, charge, notconverged

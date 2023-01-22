@@ -229,33 +229,36 @@ def sym_eig_trunc1(x,nheavyatom,nH,nocc, eig_only=False):
 
 
 
-## adapted from M.F. Kasim, arXiv:2011.04366 (2020) and https://github.com/xitorch/xitorch
+## adapted from M.F. Kasim, arXiv:2011.04366 (2020)
+##           and https://github.com/xitorch/xitorch
 class degen_symeig(torch.autograd.Function):
     @staticmethod
     def forward(ctx, A):
         eival, eivec = torch.linalg.eigh(A)
         ctx.save_for_backward(eival, eivec)
         return eival, eivec
-
+    
     @staticmethod
     def backward(ctx, grad_eival, grad_eivec):
         eival, eivec = ctx.saved_tensors
         eivecT = eivec.transpose(-2, -1).conj()
-
+        
         if grad_eivec is None: return torch.zeros_like(eivec)
         
-        # take the contribution from the eivec
         delta = eival.unsqueeze(-2) - eival.unsqueeze(-1)
-        # remove the degenerate part
+        # remove parallel and degenerate part of eigenvector deriv
         idx = torch.abs(delta) <= DEGEN_THRESHOLD
         delta[idx] = torch.inf
         delta_inv = delta.pow(-1)
-        d_delta = delta_inv * torch.matmul(eivecT, grad_eivec)
-        dA = torch.matmul(eivec, torch.matmul(d_delta, eivecT))
-        dA = dA + torch.matmul(eivec, grad_eival.unsqueeze(-1) * eivecT)
+        dC_proj = delta_inv * torch.matmul(eivecT, grad_eivec)
+        
+        # transform eigenvector and eigenvalue parts to A, sum up
+        CdCCT = torch.matmul(eivec, torch.matmul(dC_proj, eivecT))
+        CdLCT = torch.matmul(eivec, grad_eival.unsqueeze(-1) * eivecT)
+        dA = CdLCT + CdCCT
         # symmetrize to reduce numerical instability
         dA = (dA + dA.transpose(-2, -1).conj()) * 0.5
-
+        
         return dA
     
 

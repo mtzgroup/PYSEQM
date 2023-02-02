@@ -2,11 +2,12 @@ import torch
 from warnings import warn
 from torch.autograd import grad as agrad
 from torch.nn.utils.rnn import pad_sequence
-from .basics import Parser, Energy
-from .seqm_functions.constants import Constants
+from seqm.basics import Parser, Energy
+from seqm.seqm_functions.constants import Constants
+from .pyseqm_helpers import prepare_array
+
 
 LFAIL = torch.tensor(torch.inf)
-LIST_OF_TENSORS_MSG = "Input has to be provided as list of torch.Tensor's!"
 
 torch.set_default_dtype(torch.float64)
 has_cuda = torch.cuda.is_available()
@@ -31,17 +32,20 @@ class LossConstructor(torch.nn.Module):
         self.weights = torch.zeros(self.n_implemented)
         
         ## collect attributes from input
-        self.check_input(species)
-        self.species = pad_sequence(species, batch_first=True)
+        self.species = prepare_array(species, "atomic numbers")
+        self.nMols = self.species.shape[0]
         self.nAtoms = torch.count_nonzero(self.species, dim=1)
         elements = [0]+sorted(set(self.species.reshape(-1).tolist()))
-        self.check_input(coordinates)
-        self.coordinates = pad_sequence(coordinates, batch_first=True)
+        self.coordinates = prepare_array(coordinates, "coordinates")
         self.coordinates.requires_grad_(True)
+        self.req_shapes = {'forces':self.coordinates.shape}
+        for prop in ['energy', 'atomization', 'gap']:
+            self.req_shapes[prop] = (self.nMols,)
         settings = {
                     'method'             : 'AM1',
                     'scf_eps'            : 1.0e-6,
                     'scf_converger'      : [0,0.15],
+                    'scf_backward'       : 2,
                     'sp2'                : sp2_def,
                     'pair_outer_cutoff'  : 1.0e10,
                     'Hf_flag'            : False,
@@ -63,6 +67,7 @@ class LossConstructor(torch.nn.Module):
     
 #    @staticmethod
     def forward(self, p):
+#    TODO: CUSTOM BACKWARD FOR WHEN CALCULTION FAILS
 #    def forward(self, ctx, p):
         """ Get Loss. """
         if not any(self.include): raise RuntimeError("Need to add a loss property!")
@@ -123,17 +128,18 @@ class LossConstructor(torch.nn.Module):
             warn(msg)
         
         self.weights[prop2index[prop]] = weight
-        if prop == 'force': # pad forces to turn into tensor
-            exec('self.'+prop+'_ref = pad_sequence(prop_ref, batch_first=True)')
-        else:
-            exec('self.'+prop+'_ref = torch.tensor(prop_ref)')
+        if prop == 'forces':
+            ref_proc = prepare_array(prop_ref, prop+'_reference')
+        elif torch.is_tensor(prop_ref):
+            ref_proc = prop_ref
+        elif type(prop_ref) in [int, float]:
+            ref_proc = torch.tensor([prop_ref])
+        elif type(prop_ref) == list:
+            ref_proc = torch.tensor(prop_ref)
+        msg  = "Reference "+prop+" of shape "+str(tuple(ref_proc.shape))+" doesn't "
+        msg += "match input structure of "+str(self.nMols)+" molecule(s)!"
+        assert ref_proc.shape == self.req_shapes[prop], msg
+        exec('self.'+prop+'_ref = ref_proc')
         self.include[prop2index[prop]] = True
     
-    def check_input(self, inp):
-        """ Check that input is list of tensors (required for full autograd). """
-        check1 = type(inp) == list
-        check2 = all(torch.is_tensor(i) for i in inp)
-        if not (check1 and check2):
-            raise ValueError(LIST_OF_TENSORS_MSG)
-
 

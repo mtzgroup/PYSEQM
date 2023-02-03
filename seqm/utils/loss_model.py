@@ -62,9 +62,6 @@ class LossConstructor(torch.nn.Module):
         if self.__class__ != other.__class__: return False
         return self.__dict__ == other.__dict__
     
-    def __call__(self, p):
-        return self.forward(p)
-    
 #    @staticmethod
     def forward(self, p):
 #    TODO: CUSTOM BACKWARD FOR WHEN CALCULTION FAILS

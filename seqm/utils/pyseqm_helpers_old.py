@@ -156,22 +156,7 @@ def prepare_array(x, label):
     return x_proc
     
 
-def tensorsort_nD(x, sorting, axis=0):
-    """
-    Sorting all tensors in x along <axis> (<axis>+1 of total tensor, x)
-    according to <sorting>.
-    """
-    xt = x.transpose(1,axis+1)
-    shapes = xt.size()
-    d1, d2 = shapes[:2]
-    drest = shapes[2:]
-    i = torch.arange(d1).unsqueeze(1).repeat((1, d2)).flatten()
-    j = sorting.flatten()
-    xts = xt[i,j].view(d1, d2, *drest)
-    sorted_nD = xts.transpose(axis+1, 1)
-    return sorted_nD
-    
-class Orderator:
+class pyseqm_orderator:
     """
     Class to handle inputs and output of pyseqm calculation.
     
@@ -184,10 +169,18 @@ class Orderator:
     """
     
     def __init__(self, species, coordinates):
-        Z = prepare_array(species, "atomic numbers")
-        _, self.sortidx = torch.sort(Z, descending=True, stable=True)
-        xyz = prepare_array(coordinates, "coordinates")
-        self.species, self.coordinates = Z, xyz
+        n = len(species)
+        if isinstance(species, np.ndarray): species = species.tolist()
+        self.species = species.copy()
+        for i, s in enumerate(self.species):
+            if type(s) is str: self.species[i] = atomic_numbers[s]
+        ## sort by descending atomic number (and store reverse order)
+        self.sortidx = np.argsort(self.species, kind='stable')[::-1]
+        self.sortidx = self.sortidx.tolist()
+        self.reverse = [self.sortidx.index(i) for i in range(n)]
+        self.coordinates = coordinates.copy()
+        if isinstance(self.coordinates, np.ndarray):
+            self.coordinates = self.coordinates.tolist()
         
     
     def prepare_input(self, *args, axis=0):
@@ -203,17 +196,25 @@ class Orderator:
         any array provided in args ordered according to new atom 
             ordering (sorted along `axis`)
         """
-        Z = tensorsort_nD(self.species, self.sortidx)
-        xyz = tensorsort_nD(self.coordinates, self.sortidx)
+        Z = [self.species[i] for i in self.sortidx]
+        Z = torch.as_tensor([Z], dtype=torch.int64, device=device)
+        xyz = [self.coordinates[i] for i in self.sortidx]
+        xyz = torch.as_tensor([xyz], device=device)
         rest = []
         if isinstance(axis, int): axis = [axis,]*len(args)
         for i, arg in enumerate(args):
-            if not torch.is_tensor(arg): arg = prepare_array(arg)
-            arg_s = tensorsort_nD(arg, self.sortidx, axis=axis[i])
-            rest.append(arg_s)
+            if type(arg) in [np.ndarray, torch.Tensor]:
+                arg = arg.tolist()
+            my_ax = axis[i]
+            c = [j for j in range(len(np.shape(arg)))]
+            c[0] = my_ax
+            c[my_ax] = 0
+            arg_t = np.transpose(arg, c)
+            arg_s = [arg_t[j] for j in self.sortidx]
+            rest.append( np.transpose(arg_s,c) )
         return Z, xyz, *rest
     
-    def reorder(self, output, *args, axis=0):
+    def reorder_output(self, output, *args, axis=0):
         """
         Restores ordering of any provided array according to original atom ordering
         
@@ -233,12 +234,24 @@ class Orderator:
 
         """
         if isinstance(axis, int): axis = [axis,]*(1+len(args))
-        soutput = tensorsort_nD(output, self.sortidx, axis=axis[0])
-        if len(args)==0: return soutput
+        if type(output) is torch.Tensor:
+            output = output.detach().numpy()
+        c = [j for j in range(len(np.shape(output)))]
+        c[0] = axis[0]
+        c[axis[0]] = 0
+        soutput = np.transpose(output,c)
+        soutput = [soutput[j] for j in self.reverse]
+        soutput = np.transpose(soutput,c)
         rest = []
         for i, arg in enumerate(args):
-            sarg = tensorsort_nD(arg, self.sortidx, axis=axis[i+1])
-            rest.append(sarg)
+            if type(arg) is torch.Tensor: arg = arg.detach().numpy()
+            my_ax = axis[i+1]
+            c = [j for j in range(len(np.shape(arg)))]
+            c[0] = my_ax
+            c[my_ax] = 0
+            sarg = np.transpose(arg, c)
+            sarg = [sarg[j] for j in self.reverse]
+            rest.append( np.transpose(sarg,c) )
         return soutput, *rest
         
 

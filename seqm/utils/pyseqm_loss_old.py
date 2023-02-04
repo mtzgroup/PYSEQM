@@ -5,8 +5,8 @@ from warnings import warn
 from torch.autograd import grad as agrad
 from seqm.basics import Parser, Energy, Force
 from seqm.seqm_functions.constants import Constants
-from seqm.pyseqm_helpers import get_ordered_args, scale_from_unit_cube, \
-                                scale_to_unit_cube
+from .pyseqm_helpers import get_ordered_args, scale_from_unit_cube, \
+                            scale_to_unit_cube
 
 MAX_CACHE_SIZE = 0
 NUM_GRAD_EPS = 1e-7

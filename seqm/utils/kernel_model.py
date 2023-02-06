@@ -1,17 +1,18 @@
 import torch
 from itertools import chain
+from .pyseqm_helpers import prepare_array, get_default_parameters
 
 
-device = torch.device('cuda') if torch.cuda.is_available() else torch.device('cpu')
+device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
 
-class ParameterKernelModel(torch.nn.Module):
+class ParameterKernel(torch.nn.Module):
     def __init__(self, Z_ref, desc_ref):
-        super(ParameterKernelModel, self).__init__()
+        super(ParameterKernel, self).__init__()
         c1 = isinstance(Z_ref, list) and torch.is_tensor(Z_ref[0])
         c2 = isinstance(desc_ref, list) and torch.is_tensor(desc_ref[0])
         if not (c1 and c2):
             msg  = "Atomic numbers and descriptors have to be provided "
-            msg += "as list of tensors"
+            msg += "as list of tensors!"
             raise ValueError(msg)
         Zflat = list(chain(*[z_i.tolist() for z_i in Z_ref]))
         self.elements_ref = sorted(set(Zflat))
@@ -48,4 +49,49 @@ class ParameterKernelModel(torch.nn.Module):
         return y
         
     
-
+class AMASEQC(torch.nn.Module):
+    #TODO: Allow for `reference_desc` to be callable
+    def __init__(self, reference_Z, reference_desc, parameters=None, 
+                 options={}):
+        super(AMASEQC, self).__init__()
+        self.param_dir = options.get("parameter_file_dir", "nodirdefined")
+        self.method = options.get("method", "nomethoddefined")
+        if self.method == "nomethoddefined":
+            raise ValueError("`options` has to include 'method'")
+        
+        Zflat = list(chain(*[z_i.tolist() for z_i in reference_Z]))
+        self.n_ref = len(Zflat)
+        self.kernel = ParameterKernel(reference_Z, reference_desc)
+        if parameters is None:
+            self.parameters = get_parameter_names(method)
+        else:
+            self.parameters = parameters
+        
+    def __eq__(self, other):
+        if self.__class__ != other.__class__: return False
+        return self.__dict__ == other.__dict__
+    
+    def forward(self, Alpha, Z, desc, mode="full", reference_params=None):
+        msg = "`Alpha` inconsistent with (`parameters`, number of references)"
+        assert (Alpha.shape == (len(self.parameters),self.n_ref)), msg
+        species = prepare_array(Z, "atomic numbers")
+        pred = self.kernel(Alpha, Z, desc)
+        if mode == "full":
+            p = pred
+        elif mode == "delta":
+            if reference_params is None:
+                if self.param_dir == "nodirdefined":
+                    msg  = "Need to set reference parameters of path to "
+                    msg += "reference parameter file for delta learning!"
+                    raise ValueError(msg)
+                reference_params = get_default_parameters(species, 
+                                                method=self.method,
+                                                parameter_dir=self.param_dir,
+                                                param_list=self.parameters)
+            reference_params.requires_grad_(False)
+            p = reference_params + pred
+        else:
+            raise ValueError("Unknown mode '"+mode+"'!")
+        
+        #TODO: RUN CALCULATION
+    

@@ -1,7 +1,6 @@
 import torch
 from warnings import warn
 from torch.autograd import grad as agrad
-from torch.nn.utils.rnn import pad_sequence
 from seqm.basics import Parser, Energy
 from seqm.seqm_functions.constants import Constants
 from .pyseqm_helpers import prepare_array, Orderator
@@ -23,6 +22,7 @@ prop2index = {'gap':3, 'forces':2, 'atomization':0, 'energy':1}
 
 
 class LossConstructor(torch.nn.Module):
+    #TODO: Turn into abstract base loss model for regular and AMASE loss
     def __init__(self, popt_list=None, species=None, coordinates=None,
                  custom_settings=None):
         ## initialize parent module and attributes
@@ -33,9 +33,14 @@ class LossConstructor(torch.nn.Module):
         self.weights = torch.zeros(self.n_implemented)
         
         ## collect attributes from input
-        warn("You need to provide the input ordered according to descending atomic numbers!")
         self.orderer = Orderator(species, coordinates)
         self.species, self.coordinates = self.orderer.prepare_input()
+        if not (species == self.species).all():
+            msg  = "Atoms in individual molecules (along with their "
+            msg += "coordinates, reference forces, and parameters) "
+            msg += "have to be ordered according to descending atomic "
+            msg += "numbers! Hint: seqm.utils.pyseqm_helpers.Orderator."
+            raise ValueError(msg)
         self.coordinates.requires_grad_(True)
         self.nMols = self.species.shape[0]
         self.nAtoms = torch.count_nonzero(self.species, dim=1)
@@ -128,8 +133,7 @@ class LossConstructor(torch.nn.Module):
         
         self.weights[prop2index[prop]] = weight
         if prop == 'forces':
-            ref_in = prepare_array(prop_ref, prop+'_reference')
-            ref_proc = self.orderer.reorder(ref_in)
+            ref_proc = prepare_array(prop_ref, prop+'_reference')
         elif torch.is_tensor(prop_ref):
             ref_proc = prop_ref
         elif type(prop_ref) in [int, float]:

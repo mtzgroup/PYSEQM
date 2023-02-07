@@ -6,7 +6,7 @@
 # Curent (Feb/06): Basic implementation                                    #
 # TODO:  . typing                                                          #
 #        . refactor                                                        #
-#        . ?add MD engine?                                                 #
+#        . ?add MD/geometry optimization engine?                           #
 #        . custom backwards for (unlikely) RuntimeErrors in foward         #
 ############################################################################
 
@@ -70,10 +70,9 @@ class SEQM_singlepoint_core(torch.nn.Module):
                        all_terms=True)
         except RuntimeError:
             p.register_hook(lambda grad: grad * torch.nan)
-            coordinates.register_hook(lambda grad: grad * torch.nan)
-            return {'atomization':torch.nan, 'energy':torch.nan, 
-                    'forces':torch.nan*torch.ones_like(xyz), 'gap':torch.nan}
-        masking = res[-1].float() * LFAIL
+            coordinates.register_hook(lambda grad: grad * LFAIL)
+            return LFAIL, LFAIL, LFAIL*torch.ones_like(xyz), LFAIL
+        masking = torch.where(res[-1], LFAIL, 1.)
         # atomization and total energy
         Eat_fin = res[0] * masking
         Etot_fin = res[1] * masking
@@ -93,44 +92,6 @@ class SEQM_singlepoint_core(torch.nn.Module):
         self.results['forces'] = F_fin
         self.results['gap'] = gap_fin
         return Eat_fin, Etot_fin, F_fin, gap_fin
-    
-    def get_property(self, property_name):
-        if not property_name in self.results:
-            raise ValueError("Property '"+property_name+"' not available.")
-        return self.results[property_name]
-        
-    
-
-class SEQM_singlepoint(torch.nn.Module):
-    def __init__(self, seqm_settings=None):
-        super(SEQM_singlepoint, self).__init__()
-        self.settings = seqm_settings
-        self.core_runner = SEQM_singlepoint_core(seqm_settings)
-    
-    def __eq__(self, other):
-        if self.__class__ != other.__class__: return False
-        return self.__dict__ == other.__dict__
-    
-    def forward(self, p, species, coordinates, custom_params=[]):
-        self.orderer = Orderator(species, coordinates)
-        Z_padded = self.orderer.species
-        Z, xyz = self.orderer.prepare_input()
-        xyz.requires_grad_(True)
-        nodummy = (Z_padded > 0)
-        Z_plain = [s[nodummy[i]] for i, s in enumerate(Z_padded)]
-        nAtoms = torch.count_nonzero(Z, dim=1)
-        shifts = [0]+torch.cumsum(nAtoms, 0).tolist()[:-1]
-        subsort = [torch.argsort(s, descending=True) for s in Z_plain]
-        ragged_idx = [(s+shifts[i]).tolist() for i, s in enumerate(subsort)]
-        p_sorting = torch.tensor(list(chain(*ragged_idx)))
-        p_sorted = p[:,p_sorting]
-        res = self.core_runner(p_sorted, Z, xyz, custom_params=custom_params)
-        #TODO: DOUBLE-CHECK IF THIS IS NEEDED!
-#        F_resort = self.orderer.reorder(F)
-#        res[2] = F_resort
-        self.results = self.core_runner.results
-#        self.results['forces'] = F_resort
-        return res
     
     def get_property(self, property_name):
         if not property_name in self.results:
@@ -175,10 +136,10 @@ class SEQM_multirun_core(torch.nn.Module):
             res = self.calc(self.const, self.xyz, self.Z, learnedpar,
                             all_terms=True)
         except RuntimeError:
-            p.register_hook(lambda grad: grad * torch.nan)
-            self.xyz.register_hook(lambda grad: grad * torch.nan)
-            return torch.nan, torch.nan, torch.nan*torch.ones_like(self.xyz), torch.nan
-        masking = res[-1].float() * LFAIL
+            p.register_hook(lambda grad: grad * LFAIL)
+            self.xyz.register_hook(lambda grad: grad * LFAIL)
+            return LFAIL, LFAIL, LFAIL*torch.ones_like(self.xyz), LFAIL
+        masking = torch.where(res[-1], LFAIL, 1.)
         Eat_fin = res[0] * masking
         Etot_fin = res[1] * masking
         F = -agrad(res[1].sum(), self.xyz, create_graph=True)[0]
@@ -192,44 +153,6 @@ class SEQM_multirun_core(torch.nn.Module):
         self.results['gap'] = gap_fin
         return Eat_fin, Etot_fin, F_fin, gap_fin
         
-    def get_property(self, property_name):
-        if not property_name in self.results:
-            raise ValueError("Property '"+property_name+"' not available.")
-        return self.results[property_name]
-        
-    
-class SEQM_multirun(torch.nn.Module):
-    def __init__(self, species, coordinates, custom_params=[],
-                 seqm_settings=None):
-        super(SEQM_multirun, self).__init__()
-        self.orderer = Orderator(species, coordinates)
-        Z_padded = self.orderer.species
-        Z, xyz = self.orderer.prepare_input()
-        xyz.requires_grad_(True)
-        nodummy = (Z_padded > 0)
-        Z_plain = [s[nodummy[i]] for i, s in enumerate(Z_padded)]
-        nAtoms = torch.count_nonzero(Z, dim=1)
-        shifts = [0]+torch.cumsum(nAtoms, 0).tolist()[:-1]
-        subsort = [torch.argsort(s, descending=True) for s in Z_plain]
-        ragged_idx = [(s+shifts[i]).tolist() for i, s in enumerate(subsort)]
-        self.p_sorting = torch.tensor(list(chain(*ragged_idx)))
-        self.core_runner = SEQM_multirun_core(Z, xyz, 
-                custom_params=custom_params, seqm_settings=seqm_settings)
-    
-    def __eq__(self, other):
-        if self.__class__ != other.__class__: return False
-        return self.__dict__ == other.__dict__
-    
-    def forward(self, p):
-        p_sorted = p[:,self.p_sorting]
-        res = self.core_runner(p_sorted)
-        #TODO: DOUBLE-CHECK IF THIS IS NEEDED!
-#        F_resort = self.orderer.reorder(F)
-#        res[2] = F_resort
-        self.results = self.core_runner.results
-#        self.results['forces'] = F_resort
-        return res
-    
     def get_property(self, property_name):
         if not property_name in self.results:
             raise ValueError("Property '"+property_name+"' not available.")

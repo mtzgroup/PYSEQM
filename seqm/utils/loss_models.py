@@ -3,8 +3,8 @@ from warnings import warn
 from abc import ABC, abstractmethod
 from torch.autograd import grad as agrad
 from .pyseqm_helpers import prepare_array, Orderator
-from .seqm_runners import SEQM_multirun_core
-from .kernel_model import AMASE_multirun_core
+from .seqm_core_runners import SEQM_multirun_core
+from .kernel_core_runners import AMASE_multirun_core
 
 
 torch.set_default_dtype(torch.float64)

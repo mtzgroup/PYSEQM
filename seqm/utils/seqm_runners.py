@@ -73,7 +73,7 @@ class SEQM_singlepoint_core(torch.nn.Module):
             coordinates.register_hook(lambda grad: grad * torch.nan)
             return {'atomization':torch.nan, 'energy':torch.nan, 
                     'forces':torch.nan*torch.ones_like(xyz), 'gap':torch.nan}
-        masking = (~res[-1]).float()
+        masking = res[-1].float() * LFAIL
         # atomization and total energy
         Eat_fin = res[0] * masking
         Etot_fin = res[1] * masking
@@ -178,7 +178,7 @@ class SEQM_multirun_core(torch.nn.Module):
             p.register_hook(lambda grad: grad * torch.nan)
             self.xyz.register_hook(lambda grad: grad * torch.nan)
             return torch.nan, torch.nan, torch.nan*torch.ones_like(self.xyz), torch.nan
-        masking = (~res[-1]).float()
+        masking = res[-1].float() * LFAIL
         Eat_fin = res[0] * masking
         Etot_fin = res[1] * masking
         F = -agrad(res[1].sum(), self.xyz, create_graph=True)[0]

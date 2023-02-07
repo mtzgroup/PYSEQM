@@ -85,7 +85,7 @@ class AMASE_singlepoint_core(torch.nn.Module):
     #TODO: Allow for `reference_desc` to be callable
     #TODO: Typing, some refactoring, clean-up, docs
     def __init__(self, reference_Z, reference_desc, reference_coordinates=None,
-                 seqm_settings={}, parameters=None, mode="full", 
+                 seqm_settings={}, custom_params=None, mode="full", 
                  custom_reference=False):
         super(AMASE_singlepoint_core, self).__init__()
         self.param_dir = seqm_settings.get("parameter_file_dir", "nodirdefined")
@@ -96,10 +96,10 @@ class AMASE_singlepoint_core(torch.nn.Module):
         self.n_ref = torch.count_nonzero(reference_Z)
         if callable(reference_desc): raise NotImplementedError
         self.kernel = ParameterKernel(reference_Z, reference_desc)
-        if parameters is None:
-            self.parameters = get_parameter_names(method)
+        if custom_params is None:
+            self.custom_params = get_parameter_names(method)
         else:
-            self.parameters = parameters
+            self.custom_params = custom_params
         if mode == "full":
             self.process_prediction = self.full_prediction
         elif mode == "delta":
@@ -122,20 +122,20 @@ class AMASE_singlepoint_core(torch.nn.Module):
     def delta_default(self, par, species=None, reference_par=None):
         reference_par = get_default_parameters(species,
                             method=self.method, parameter_dir=self.param_dir,
-                            param_list=self.parameters)
+                            param_list=self.custom_params)
         return reference_par + par
     
     def custom_delta(self, par, reference_par=None, **kwargs):
         return reference_par + par
     
     def forward(self, Alpha, Z, positions, desc, reference_params=None, expK=1):
-        msg = "`Alpha` inconsistent with (`parameters`, number of references)"
-        assert (Alpha.shape == (len(self.parameters),self.n_ref)), msg
+        msg = "`Alpha` inconsistent with (`custom_params`, number of references)"
+        assert (Alpha.shape == (len(self.custom_params),self.n_ref)), msg
         if callable(desc): raise NotImplementedError
         pred = self.kernel(Alpha, Z, desc, expK=expK)
         p = self.process_prediction(pred, species=Z, 
                                     reference_par=reference_params)
-        res = self.seqm_runner(p, Z, positions, custom_params=self.parameters)
+        res = self.seqm_runner(p, Z, positions, custom_params=self.custom_params)
         self.results = self.seqm_runner.results
         return res
     
@@ -148,14 +148,14 @@ class AMASE_singlepoint_core(torch.nn.Module):
 
 class AMASE_singlepoint(torch.nn.Module):
     def __init__(self, reference_Z, reference_desc, reference_coordinates=None,
-                 seqm_settings={}, parameters=None, mode="full",
+                 seqm_settings={}, custom_params=None, mode="full",
                  custom_reference=False):
         super(AMASE_singlepoint, self).__init__()
         Z_ref = prepare_array(reference_Z, "atomic numbers")
         self.core_runner = AMASE_singlepoint_core(Z_ref, reference_desc, 
                 reference_coordinates=reference_coordinates, 
-                seqm_settings=seqm_settings, parameters=parameters, mode=mode,
-                custom_reference=custom_reference)
+                seqm_settings=seqm_settings, custom_params=custom_params,
+                mode=mode, custom_reference=custom_reference)
     
     def __eq__(self, other):
         if self.__class__ != other.__class__: return False
@@ -182,7 +182,7 @@ class AMASE_multirun_core(torch.nn.Module):
     #TODO: Typing, refactor, clean-up, docs
     def __init__(self, Z, desc, coordinates, reference_Z, reference_desc, 
                  reference_coordinates=None, seqm_settings={}, mode="full", 
-                 parameters=None, custom_reference=None, expK=1):
+                 custom_params=None, custom_reference=None, expK=1):
         super(AMASE_multirun_core, self).__init__()
         # check input
         if not torch.is_tensor(Z):
@@ -200,14 +200,14 @@ class AMASE_multirun_core(torch.nn.Module):
         
         if callable(reference_desc): raise NotImplementedError
         if callable(desc): raise NotImplementedError
-        if parameters is None:
-            self.parameters = get_parameter_names(method)
+        if custom_params is None:
+            self.custom_params = get_parameter_names(method)
         else:
-            self.parameters = parameters
+            self.custom_params = custom_params
         
         # default parameters for method (as reference or as template)
         p_def = get_default_parameters(Z, method=self.method, 
-                    parameter_dir=self.param_dir, param_list=self.parameters)
+                    parameter_dir=self.param_dir, param_list=self.custom_params)
         # set p0 depending on mode (final p = prediction + p0)
         if mode == "full":
             self.p0 = torch.zeros_like(p_def)
@@ -240,8 +240,8 @@ class AMASE_multirun_core(torch.nn.Module):
         self.K = kernel.get_sorted_kernel(elements, Z, desc, expK=expK)
         # set up multirun calculator
         self.seqm_runner = SEQM_multirun_core(Z, coordinates,
-                                              custom_params=self.parameters,
-                                              seqm_settings=seqm_settings)
+                                      custom_params=self.custom_params,
+                                      seqm_settings=seqm_settings)
         self.results = {}
     
     def __eq__(self, other):
@@ -267,7 +267,7 @@ class AMASE_multirun_core(torch.nn.Module):
 class AMASE_multirun(torch.nn.Module):
     def __init__(self, Z, desc, coordinates, reference_Z, reference_desc,
                  reference_coordinates=None, seqm_settings={}, mode="full",
-                 parameters=None, custom_reference=None, expK=1):
+                 custom_params=None, custom_reference=None, expK=1):
         super(AMASE_multirun, self).__init__()
         Z_ref = prepare_array(reference_Z, "atomic numbers")
         orderer = Orderator(Z, coordinates)
@@ -276,7 +276,7 @@ class AMASE_multirun(torch.nn.Module):
         self.core_runner = AMASE_multirun_core(species, desc, xyz, Z_ref, 
                 reference_desc, reference_coordinates=reference_coordinates,
                 seqm_settings=seqm_settings, mode=mode, expK=expK,
-                parameters=parameters, custom_reference=custom_reference)
+                custom_params=custom_params, custom_reference=custom_reference)
     
     def __eq__(self, other):
         if self.__class__ != other.__class__: return False

@@ -1,32 +1,28 @@
 import torch
 from warnings import warn
+from abc import ABC, abstractmethod
 from torch.autograd import grad as agrad
-from seqm.basics import Parser, Energy
-from seqm.seqm_functions.constants import Constants
 from .pyseqm_helpers import prepare_array, Orderator
+from .seqm_runners import SEQM_multirun_core
+from .kernel_model import AMASE_multirun_core
 
-
-LFAIL = torch.tensor(torch.inf)
 
 torch.set_default_dtype(torch.float64)
-has_cuda = torch.cuda.is_available()
-if has_cuda:
-    device = torch.device('cuda')
-    sp2_def = [True, 1e-5]
-else:
-    device = torch.device('cpu')
-    sp2_def = [False]
-
-prop2index = {'gap':3, 'forces':2, 'atomization':0, 'energy':1}
+prop2index = {'atomization':0, 'energy':1, 'forces':2, 'gap':3}
 
 
-
-class LossConstructor(torch.nn.Module):
-    #TODO: Turn into abstract base class for regular and AMASEQC losses
-    def __init__(self, popt_list=None, species=None, coordinates=None,
-                 custom_settings=None):
+class AbstractLoss(torch.nn.Module, ABC):
+    """
+    Abstract base class for loss modules.
+    Implements common features such as basic initialization, loss evaluation,
+    adding loss properties, and minimization.
+    
+    Individual, concrete loss modules have to extend base `__init__`
+    and provide a corresponding implementation of `self.run_calculation(x)`.
+    """
+    def __init__(self, species, coordinates, custom_params=None):
+        super(AbstractLoss, self).__init__()
         ## initialize parent module and attributes
-        super(LossConstructor, self).__init__()
         self.implemented = ['energy', 'forces', 'gap', 'atomization']
         self.n_implemented = len(self.implemented)
         self.include = [False,]*self.n_implemented
@@ -35,83 +31,50 @@ class LossConstructor(torch.nn.Module):
         ## collect attributes from input
         self.orderer = Orderator(species, coordinates)
         self.species, self.coordinates = self.orderer.prepare_input()
-        if not (species == self.species).all():
-            msg  = "Atoms in individual molecules (along with their "
-            msg += "coordinates, reference forces, and parameters) "
-            msg += "have to be ordered according to descending atomic "
-            msg += "numbers! Hint: seqm.utils.pyseqm_helpers.Orderator."
+        if not (self.species == prepare_array(species, "Z")).all():
+            msg  = "For efficiency reasons and consistency, all individual "
+            msg += "molecules (along with their positions and reference "
+            msg += "forces) have to be ordered according to descending "
+            msg += "atomic numbers. Hint: seqm.utils.pyseqm_helpers.Orderator"
             raise ValueError(msg)
-        self.coordinates.requires_grad_(True)
         self.nMols = self.species.shape[0]
         self.nAtoms = torch.count_nonzero(self.species, dim=1)
-        elements = sorted(set([0] + self.species.reshape(-1).tolist()))
         self.req_shapes = {'forces':self.coordinates.shape}
         for prop in ['energy', 'atomization', 'gap']:
             self.req_shapes[prop] = (self.nMols,)
-        settings = {
-                    'method'             : 'AM1',
-                    'scf_eps'            : 1.0e-6,
-                    'scf_converger'      : [0,0.15],
-                    'scf_backward'       : 2,
-                    'sp2'                : sp2_def,
-                    'pair_outer_cutoff'  : 1.0e10,
-                    'Hf_flag'            : False,
-                   }
-        settings.update(custom_settings)
-        settings['elements'] = torch.tensor(elements)
-        settings['learned'] = popt_list
-        settings['eig'] = True
-        self.custom_params = popt_list
-        self.const = Constants()#.to(device)
-        self.calc = Energy(settings)#.to(device)
-    
+        self.custom_params = custom_params
+        
     def __eq__(self, other):
         if self.__class__ != other.__class__: return False
         return self.__dict__ == other.__dict__
-    
-#    @staticmethod
-    def forward(self, p):
-#    TODO: NEED CUSTOM BACKWARD FOR WHEN CALCULTION FAILS (RETURN INF).
-#          IS p.register_backward_hook(lambda grad: grad * LFAIL) working?
-#    def forward(self, ctx, p):
-        """ Get Loss. """
-        if not any(self.include): raise RuntimeError("Need to add a loss property!")
-        learnedpar = {pname:p[i] for i, pname in enumerate(self.custom_params)}
-        Deltas = torch.zeros(self.n_implemented)
-        try:
-            res = self.calc(self.const, self.coordinates, self.species, 
-                            learnedpar, all_terms=True)
-        except RuntimeError:
-            p.register_backward_hook(lambda grad: grad * LFAIL)
-            return LFAIL
         
-        masking = (~res[-1]).float()
+    def forward(self, x):
+        """ Get Loss. """
+        Deltas = torch.zeros(self.n_implemented)
+        res = self.run_calculation(x)
         if self.include[0]:
-            DeltaA2 = torch.square(res[0] - self.atomization_ref) / self.nAtoms
-            Deltas[0] = (DeltaA2 * masking).sum()
+            DeltaA2 = torch.square(res[0] - self.atomization_ref)
+            Deltas[0] = (DeltaA2 / self.nAtoms).sum()
         if self.include[1]:
-            DeltaE2 = torch.square(res[1] - self.energy_ref) / self.nAtoms
-            Deltas[1] = (DeltaE2 * masking).sum()
+            DeltaE2 = torch.square(res[1] - self.energy_ref)
+            Deltas[1] = (DeltaE2 / self.nAtoms).sum()
         if self.include[2]:
-            F = -agrad(res[1].sum(), self.coordinates, create_graph=True)[0]
-            DeltaF2 = torch.square(F - self.forces_ref).sum(dim=(1,2)) / self.nAtoms
-            Deltas[2] = (DeltaF2 * masking).sum()
+            DeltaF2 = torch.square(res[2] - self.forces_ref).sum(dim=(1,2))
+            Deltas[2] = (DeltaF2 / self.nAtoms).sum()
         if self.include[3]:
-            parser = Parser(self.calc.seqm_parameters)
-            n_occ = parser(self.const, self.species, self.coordinates)[:,4]
-            homo, lumo = n_occ - 1, n_occ
-            orb_eigs = res[6]
-            gap = orb_eigs[:,lumo] - orb_eigs[:,homo]
-            DeltaG2 = torch.square(gap - self.gap_ref)
-            Deltas[3] = (DeltaG2 * masking).sum()
+            DeltaG2 = torch.square(res[3] - self.gap_ref)
+            Deltas[3] = DeltaG2.sum()
         return (Deltas * self.weights).sum()
     
-#    @staticmethod
-#    def backward(ctx, grad_in)
-#        if grad_in is None: return torch.zeros_like(grad_in)
-#        SCFfailed = ctx.saved_tensors
-#        if SCFfailed: return torch.ones_like(grad_in)*LFAIL
-#        return ???
+    @abstractmethod
+    def run_calculation(self, x):
+        """
+        Abstract method for gathering results in the form Eat, Etot, F, gap.
+        This has to be implemented by the individual concrete loss modules
+        (either as explicit function or during `__init__` see, e.g., below).
+        `run_calculation` should return inf for molecules where SCF failed!
+        """
+        pass
     
     def add_loss(self, prop, prop_ref, weight=1.):
         """
@@ -130,7 +93,6 @@ class LossConstructor(torch.nn.Module):
             msg += 'SEQM parameters (MOs crossing) -> unlikely, but '
             msg += 'possible instabilities in autograd!'
             warn(msg)
-        
         self.weights[prop2index[prop]] = weight
         if prop == 'forces':
             ref_proc = prepare_array(prop_ref, prop+'_reference')
@@ -140,10 +102,61 @@ class LossConstructor(torch.nn.Module):
             ref_proc = torch.tensor([prop_ref])
         elif type(prop_ref) == list:
             ref_proc = torch.tensor(prop_ref)
-        msg  = "Reference "+prop+" of shape "+str(tuple(ref_proc.shape))+" doesn't "
-        msg += "match input structure of "+str(self.nMols)+" molecule(s)!"
+        msg  = "Reference "+prop+" of shape "+str(tuple(ref_proc.shape))
+        msg += " doesn't match input structure of "+str(self.nMols)
+        msg += " molecule(s)!"
         assert ref_proc.shape == self.req_shapes[prop], msg
         exec('self.'+prop+'_ref = ref_proc')
         self.include[prop2index[prop]] = True
+    
+    def minimize(self, x_init, options):
+        """ Generic minimization routine. """
+        #TODO: minimize(self.forward, x_init, options)
+        raise NotImplementedError
+    
+    def gradient(self, x):
+        """ Return gradient of loss at input x. """
+        L = self.forward(x)
+        dLdx = agrad(L, x, retain_graph=True)[0]
+        return dLdx
+        
+    
+
+#############################################
+##          CONCRETE LOSS MODULES          ##
+#############################################
+
+class SEQM_Loss(AbstractLoss):
+    def __init__(self, species, coordinates, custom_params=None, 
+                 seqm_settings=None):
+        ## initialize parent module
+        super(SEQM_Loss, self).__init__(species, coordinates, 
+                                        custom_params=custom_params)
+        self.runner = SEQM_multirun_core(self.species, self.coordinates,
+            custom_params=self.custom_params, seqm_settings=seqm_settings)
+    
+    def run_calculation(self, p):
+        return self.runner(p)
+        
+    
+
+class AMASE_Loss(AbstractLoss):
+    def __init__(self, species, coordinates, desc, reference_Z, 
+        reference_desc, reference_coordinates=None, custom_params=None, 
+        seqm_settings=None, mode="full", custom_reference=None, expK=1):
+        ## initialize parent module
+        super(AMASE_Loss, self).__init__(species, coordinates,
+                                         custom_params=custom_params)
+        Z_ref = prepare_array(reference_Z, "atomic numbers")
+        self.runner = AMASE_multirun_core(self.species, desc, 
+                self.coordinates, Z_ref, reference_desc,
+                reference_coordinates=reference_coordinates, 
+                seqm_settings=seqm_settings, mode=mode, 
+                custom_params=custom_params, expK=expK, 
+                custom_reference=custom_reference)
+    
+    def run_calculation(self, A):
+        return self.runner(A)
+        
     
 

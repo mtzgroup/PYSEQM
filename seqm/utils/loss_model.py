@@ -22,7 +22,7 @@ prop2index = {'gap':3, 'forces':2, 'atomization':0, 'energy':1}
 
 
 class LossConstructor(torch.nn.Module):
-    #TODO: Turn into abstract base loss model for regular and AMASE loss
+    #TODO: Turn into abstract base class for regular and AMASEQC losses
     def __init__(self, popt_list=None, species=None, coordinates=None,
                  custom_settings=None):
         ## initialize parent module and attributes

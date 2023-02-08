@@ -1,1 +1,1 @@
-from . import pyseqm_helpers, loss_models, wrappers
+from . import pyseqm_helpers, loss_modules, wrappers

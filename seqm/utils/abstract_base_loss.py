@@ -4,7 +4,6 @@
 #                                                                           #
 # Current (Feb/07)                                                          #
 # TODO: . typing                                                            #
-#       . learning rate scheduler!                                          #
 #       . enable loss functions from pytroch (at the moment: custom RSS)    #
 #       . check functionality of minimize with other (pytorch) optimizers   #
 #       . double-check GPU support!                                         #
@@ -21,6 +20,12 @@ torch.set_default_dtype(torch.float64)
 prop2index = {'atomization':0, 'energy':1, 'forces':2, 'gap':3}
 
 
+class NoScheduler:
+    """ Dummy scheduler class. """
+    def __init__(self): pass
+    def step(self): pass
+
+    
 class RSSperAtom(torch.nn.Module):
     def __init__(self):
         super(RSSperAtom, self).__init__()
@@ -129,8 +134,10 @@ class AbstractLoss(ABC, torch.nn.Module):
         assert ref_proc.shape == self.req_shapes[prop], msg
         exec('self.'+prop+'_ref = ref_proc')
         self.include.append(prop2index[prop])
+        
     
-    def minimize(self, x, n_epochs=4, optimizer='LBFGS', **kwargs):
+    def minimize(self, x, n_epochs=4, optimizer="LBFGS", upward_thresh=5,
+                 opt_kwargs={}, scheduler=None, scheduler_kwargs={}):
         """ Generic minimization routine. """
         try:
             my_opt = getattr(torch.optim, optimizer)
@@ -139,19 +146,56 @@ class AbstractLoss(ABC, torch.nn.Module):
             msg += "optimizers from torch.optim are supported."
             raise ImportError(msg)
         opt_options = {'max_iter':10, 'tolerance_grad':1e-06,
-                       'tolerance_change':1e-08}
-        opt_options.update(kwargs)
+                       'tolerance_change':1e-08, 'lr':0.5}
+        opt_options.update(opt_kwargs)
         opt = my_opt([x], **opt_options)
+        lr_sched = self.add_scheduler(scheduler, opt, scheduler_kwargs)
         def closure():
             if torch.is_grad_enabled(): opt.zero_grad()
             L = self(x)
             L.backward()
             return L
-        self.minimize_log = []
+        Lbak, n_up, self.minimize_log = torch.inf, 0, []
         for n in range(n_epochs):
             L = opt.step(closure)
+            n_up = (L > Lbak).float() * (n_up + 1)
+            if n_up > upward_thresh:
+                msg  = "Loss increased more than "+str(upward_thresh)
+                msg += " times. This may indicate a failure in training. "
+                msg += "You can adjust this limit via 'upward_thresh'."
+                raise RuntimeError(msg)
+            Lbak = L.clone()
+            for sched in lr_sched: sched.step()
             self.minimize_log.append(L.item())
         return x, L
+        
+    
+    def add_scheduler(self, scheduler, optimizer, sched_kwargs={}):
+        if scheduler is None:
+            return [NoScheduler()]
+        elif isinstance(scheduler, list) and len(scheduler)>1:
+            lr_sched = []
+            for i, s in enumerate(scheduler):
+                try:
+                    my_sched = getattr(torch.optim.lr_scheduler, s)
+                    lr_sched.append(my_sched(optimizer, **sched_kwargs[i]))
+                except AttributeError:
+                    msg  = "Unknown scheduler '"+sched+"'. Currently, only "
+                    msg += "schedulers in torch.optim.lr_scheduler supported"
+                    raise ImportError(msg)
+            return lr_sched
+        elif isinstance(scheduler, str):
+            try:
+                my_sched = getattr(torch.optim.lr_scheduler, scheduler)
+                return [my_sched(optimizer, **sched_kwargs)]
+            except AttributeError:
+                msg  = "Unknown scheduler '"+scheduler+"'. Currently, only "
+                msg += "schedulers in torch.optim.lr_scheduler supported"
+                raise ImportError(msg)
+        else:
+            msg = "Unrecognized type '"+type(scheduler)+"' for 'scheduler'"
+            raise ValueError(msg)
+        
     
     def gradient(self, x):
         """ Return gradient of loss at input x. """

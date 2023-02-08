@@ -1,21 +1,19 @@
 ############################################################################
-# Utilities for running SEQM calculations                                  #
+# Utilities for simplifying running SEQM calculations                      #
 #  - SEQM_singlepoint: parameters, species, coordinates defined at runtime #
 #  - SEQM_multirun: parameters at runtime, systems fixed (for training)    #
 #                                                                          #
 # Curent (Feb/06): Basic implementation                                    #
 # TODO:  . typing                                                          #
-#        . refactor                                                        #
 #        . ?add MD/geometry optimization engine?                           #
 #        . custom backwards for (unlikely) RuntimeErrors in foward         #
 ############################################################################
 
 import torch
-from itertools import chain
 from torch.autograd import grad as agrad
 from seqm.basics import Parser, Energy
 from seqm.seqm_functions.constants import Constants
-from .pyseqm_helpers import Orderator
+from .pyseqm_helpers import Orderator, get_default_parameters
 
 
 LFAIL = torch.tensor(torch.inf)
@@ -30,6 +28,7 @@ else:
     sp2_def = [False]
 
 
+# default SEQC settings
 default_settings = {
                     'method'            : 'AM1',
                     'scf_eps'           : 1.0e-6,
@@ -42,25 +41,91 @@ default_settings = {
 
 
 class SEQM_singlepoint_core(torch.nn.Module):
-    def __init__(self, seqm_settings=None):
+    """
+    Core routine for running SEQC calculation for molecules
+    (see seqm.utils.wrappers.SEQC_singlepoint for convenient wrapper)
+    In singlepoint mode, SEQC parameters, atomic numbers, positions, custom
+    parameter names, and custom reference parameters (`delta` mode, see below)
+    are set at runtime.
+    
+    Parameters at instantiation:
+      . seqm_settings, dict: settings for SEQC calculation
+      . mode, str: if 'full', input parameters of call are SEQC parameters
+                   if 'delta', SEQC parameters = input + reference params
+            default: 'full'
+    
+    Parameters at call/forward:
+      . p, torch.Tensor: SEQC parameters (or Delta parameters in 'delta' mode)
+      . species, torch.Tensor: atomic numbers (sorted in descending order)
+      . coordinates, torch.Tensor: atomic positions (ordered accordingly)
+      . custom_params, list of str: names of custom parameters in p
+            default: [] (i.e., all standard parameters)
+      . custom_reference, torch.Tensor: In 'delta' mode, SEQC parameters are
+            given by `p` + `custom_reference`, default: None. If in 'delta' 
+            mode and `custom_reference` is None: use standard parameters of
+            method (as defined in `seqm_settings`) as reference params.
+    
+    Call/forward returns:
+    ---------------------
+      . Eat, torch.Tensor: atomization energy for each molecule
+      . Etot, torch.Tensor: total energy for each molecule
+      . F, torch.Tensor: atomic forces for each molecule
+      . gap, torch.Tensor: HOMO-LUMO gap for each molecule
+    
+    Call/forward sets:
+    ------------------
+      . self.results, dict: dictionary containing Eat, Etot, F, gap
+            (accessible through self.get_property(prop)
+    
+    """
+    def __init__(self, seqm_settings={}, mode="full"):
         super(SEQM_singlepoint_core, self).__init__()
         self.settings = default_settings
         self.settings.update(seqm_settings)
+        self.param_dir = seqm_settings.get("parameter_file_dir", "nodirdefined")
+        self.method = seqm_settings.get("method", "nomethoddefined")
+        if self.method == "nomethoddefined":
+            raise ValueError("`seqm_settings` has to include 'method'")
+        # set preprocessing of input -> SEQC parameters depending on `mode`
+        if mode == "full":
+            self.process_prediction = self.full_prediction
+        elif mode == "delta":
+            if custom_reference:
+                self.process_prediction = self.delta_custom
+            else:
+                self.process_prediction = self.delta_default
+        else:
+            raise ValueError("Unknown mode '"+mode+"'.")
         self.const = Constants()
         self.results = {}
     
     def __eq__(self, other):
         if self.__class__ != other.__class__: return False
         return self.__dict__ == other.__dict__
-
+    
+    def full_prediction(self, par, **kwargs):
+        return par
+    
+    def delta_default(self, par, species=None, custom_par=[], 
+                      reference_par=None):
+        reference_par = get_default_parameters(species, method=self.method, 
+                      parameter_dir=self.param_dir, param_list=custom_params)
+        return reference_par + par
+    
+    def custom_delta(self, par, reference_par=None, **kwargs):
+        return reference_par + par
+    
 #    @staticmethod
-    def forward(self, p, species, coordinates, custom_params=[]):
+    def forward(self, p, species, coordinates, custom_params=[],
+                custom_reference=None):
 #    TODO: NEED CUSTOM BACKWARD FOR WHEN CALCULTION FAILS (RETURN NaN).
 #          IS p.register_hook(lambda grad: grad * NaN) working?
 #    def forward(self, ctx, p):
         """ Run calculation. """
         elements = sorted(set([0] + species.reshape(-1).tolist()))
-        learnedpar = {par:p[i] for i, par in enumerate(custom_params)}
+        p_proc = self.process_prediction(pred, species=Z,
+                                    reference_par=custom_reference)
+        learnedpar = {par:p_proc[i] for i, par in enumerate(custom_params)}
         self.settings['elements'] = torch.tensor(elements)
         self.settings['learned'] = custom_params
         self.settings['eig'] = True
@@ -87,6 +152,7 @@ class SEQM_singlepoint_core(torch.nn.Module):
         ehomo = torch.gather(res[6], 1, homo).reshape(-1)
         elumo = torch.gather(res[6], 1, lumo).reshape(-1)
         gap_fin = (elumo - ehomo) * masking
+        # update self.results dict
         self.results['atomization'] = Eat_fin
         self.results['energy'] = Etot_fin
         self.results['forces'] = F_fin
@@ -101,11 +167,54 @@ class SEQM_singlepoint_core(torch.nn.Module):
     
 
 class SEQM_multirun_core(torch.nn.Module):
+    """
+    Core routine for running multiple SEQC calculation for molecules
+    (see seqm.utils.wrappers.SEQC_multirun for convenient wrapper)
+    In multirun mode, only SEQC parameters (or Deltas) are set at runtime.
+    This is mostly for parameter optimization.
+    
+    Parameters at instantiation:
+      . seqm_settings, dict: settings for SEQC calculation
+      . mode, str: if 'full', input parameters of call are SEQC parameters
+                   if 'delta', SEQC parameters = input + reference params
+            default: 'full'
+      . species, torch.Tensor: atomic numbers (sorted in descending order)
+      . coordinates, torch.Tensor: atomic positions (ordered accordingly)
+      . custom_params, list of str: names of custom parameters in p
+            default: [] (i.e., all standard parameters)
+      . custom_reference, torch.Tensor: In 'delta' mode, SEQC parameters are
+            given by `p` + `custom_reference`, default: None. If in 'delta' 
+            mode and `custom_reference` is None: use standard parameters of
+            method (as defined in `seqm_settings`) as reference params.
+    
+    Parameters at call/forward:
+      . p, torch.Tensor: SEQC parameters (or Delta parameters in 'delta' mode)
+    
+    Call/forward returns:
+    ---------------------
+      . Eat, torch.Tensor: atomization energy for each molecule
+      . Etot, torch.Tensor: total energy for each molecule
+      . F, torch.Tensor: atomic forces for each molecule
+      . gap, torch.Tensor: HOMO-LUMO gap for each molecule
+    
+    Call/forward sets:
+    ------------------
+      . self.results, dict: dictionary containing Eat, Etot, F, gap
+            (accessible through self.get_property(prop)
+    
+    """
     def __init__(self, species, coordinates, custom_params=[], 
-                 seqm_settings=None):
+                 seqm_settings=None, mode="full", custom_reference=None):
+        # initialize parent and gather attributes from input
         super(SEQM_multirun_core, self).__init__()
         settings = default_settings
         settings.update(seqm_settings)
+        method = seqm_settings.get("method", "nomethoddefined")
+        if method == "nomethoddefined":
+            raise ValueError("`seqm_settings` has to include 'method'")
+        param_dir = seqm_settings.get("parameter_file_dir", "nodirdefined")
+        if param_dir == "nodirdefined":
+            raise ValueError("`seqm_settings` has to include 'parameter_file_dir'")
         self.const = Constants()
         self.Z, self.xyz = species, coordinates
         self.xyz.requires_grad_(True)
@@ -114,7 +223,22 @@ class SEQM_multirun_core(torch.nn.Module):
         settings['elements'] = torch.tensor(elements)
         settings['learned'] = custom_params
         settings['eig'] = True
+        # default parameters for method (as reference or as template)
+        p_def = get_default_parameters(species, method=method,
+                    parameter_dir=param_dir, param_list=custom_params)
+        # set `self.p0` depending on `mode` (final `p` = input + `self.p0`)
+        if mode == "full":
+            self.p0 = torch.zeros_like(p_def)
+        elif mode == "delta":
+            if custom_reference is None:
+                self.p0 = p_def.clone()
+            else:
+                self.p0 = custom_reference
+        else:
+            raise ValueError("Unknown mode '"+mode+"'.")
+        self.p0.requires_grad_(False)
         self.calc = Energy(settings)
+        # get HOMO and LUMO indices
         my_parser = Parser(self.calc.seqm_parameters)
         n_occ = my_parser(self.const, self.Z, self.xyz)[4]
         self.homo = (n_occ-1).unsqueeze(-1)
@@ -131,7 +255,9 @@ class SEQM_multirun_core(torch.nn.Module):
 #          IS p.register_hook(lambda grad: grad * NaN) working?
 #    def forward(self, ctx, p):
         """ Run calculation. """
-        learnedpar = {par:p[i] for i, par in enumerate(self.custom_par)}
+        # preprocess input according to `mode`
+        p_proc = p + self.p0
+        learnedpar = {par:p_proc[i] for i, par in enumerate(self.custom_par)}
         try:
             res = self.calc(self.const, self.xyz, self.Z, learnedpar,
                             all_terms=True)
@@ -147,6 +273,7 @@ class SEQM_multirun_core(torch.nn.Module):
         ehomo = torch.gather(res[6], 1, self.homo).reshape(-1)
         elumo = torch.gather(res[6], 1, self.lumo).reshape(-1)
         gap_fin = (elumo - ehomo) * masking
+        # update results dict
         self.results['atomization'] = Eat_fin
         self.results['energy'] = Etot_fin
         self.results['forces'] = F_fin

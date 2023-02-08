@@ -7,16 +7,17 @@ from .kernel_core_runners import AMASE_singlepoint_core, AMASE_multirun_core
 
 
 class SEQM_singlepoint(torch.nn.Module):
-    def __init__(self, seqm_settings=None):
+    def __init__(self, seqm_settings={}, mode="full"):
         super(SEQM_singlepoint, self).__init__()
         self.settings = seqm_settings
-        self.core_runner = SEQM_singlepoint_core(seqm_settings)
+        self.core_runner = SEQM_singlepoint_core(seqm_settings, mode=mode, custom_reference=custom_reference)
     
     def __eq__(self, other):
         if self.__class__ != other.__class__: return False
         return self.__dict__ == other.__dict__
     
-    def forward(self, p, species, coordinates, custom_params=[]):
+    def forward(self, p, species, coordinates, custom_params=[], mode="full",
+                custom_reference=None):
         self.orderer = Orderator(species, coordinates)
         Z_padded = self.orderer.species
         Z, xyz = self.orderer.prepare_input()
@@ -29,7 +30,8 @@ class SEQM_singlepoint(torch.nn.Module):
         ragged_idx = [(s+shifts[i]).tolist() for i, s in enumerate(subsort)]
         p_sorting = torch.tensor(list(chain(*ragged_idx)))
         p_sorted = p[:,p_sorting]
-        res = self.core_runner(p_sorted, Z, xyz, custom_params=custom_params)
+        res = self.core_runner(p_sorted, Z, xyz, custom_params=custom_params,
+                               custom_reference=custom_reference)
         #TODO: DOUBLE-CHECK IF THIS IS NEEDED!
 #        F_resort = self.orderer.reorder(F)
 #        res[2] = F_resort
@@ -44,8 +46,8 @@ class SEQM_singlepoint(torch.nn.Module):
         
     
 class SEQM_multirun(torch.nn.Module):
-    def __init__(self, species, coordinates, custom_params=[],
-                 seqm_settings=None):
+    def __init__(self, species, coordinates, custom_params=[], mode="full",
+                custom_reference=None, seqm_settings=None):
         super(SEQM_multirun, self).__init__()
         self.orderer = Orderator(species, coordinates)
         Z_padded = self.orderer.species
@@ -59,7 +61,9 @@ class SEQM_multirun(torch.nn.Module):
         ragged_idx = [(s+shifts[i]).tolist() for i, s in enumerate(subsort)]
         self.p_sorting = torch.tensor(list(chain(*ragged_idx)))
         self.core_runner = SEQM_multirun_core(Z, xyz,
-                custom_params=custom_params, seqm_settings=seqm_settings)
+                                        custom_params=custom_params,
+                                        custom_reference=custom_reference,
+                                        seqm_settings=seqm_settings)
     
     def __eq__(self, other):
         if self.__class__ != other.__class__: return False

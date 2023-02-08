@@ -16,24 +16,28 @@ from .kernel_core_runners import AMASE_multirun_core
 
 
 class SEQM_Loss(AbstractLoss):
-    def __init__(self, species, coordinates, custom_params=None,
-                 seqm_settings=None):
-        ## initialize parent module
+    """ Concrete loss module for to optimize parameters of SEQC."""
+    def __init__(self, species, coordinates, custom_params=[], mode="full",
+                 seqm_settings={}, custom_reference=None):
         super(SEQM_Loss, self).__init__(species, coordinates,
                                         custom_params=custom_params)
         self.runner = SEQM_multirun_core(self.species, self.coordinates,
-            custom_params=self.custom_params, seqm_settings=seqm_settings)
-
+            custom_params=self.custom_params, seqm_settings=seqm_settings,
+            mode=mode, custom_reference=custom_reference)
+    
     def run_calculation(self, p):
         return self.runner(p)
-
-
+        
+    
 
 class AMASE_Loss(AbstractLoss):
+    """
+    Concrete loss module to optimize regression vector for SEQC with
+    kernel-predicted parameters.
+    """
     def __init__(self, species, coordinates, desc, reference_Z,
         reference_desc, reference_coordinates=None, custom_params=None,
         seqm_settings=None, mode="full", custom_reference=None, expK=1):
-        ## initialize parent module
         super(AMASE_Loss, self).__init__(species, coordinates,
                                          custom_params=custom_params)
         Z_ref = prepare_array(reference_Z, "atomic numbers")

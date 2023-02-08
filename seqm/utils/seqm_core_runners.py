@@ -90,10 +90,7 @@ class SEQM_singlepoint_core(torch.nn.Module):
         if mode == "full":
             self.process_prediction = self.full_prediction
         elif mode == "delta":
-            if custom_reference:
-                self.process_prediction = self.delta_custom
-            else:
-                self.process_prediction = self.delta_default
+            self.process_prediction = self.delta_prediction
         else:
             raise ValueError("Unknown mode '"+mode+"'.")
         self.const = Constants()
@@ -106,13 +103,12 @@ class SEQM_singlepoint_core(torch.nn.Module):
     def full_prediction(self, par, **kwargs):
         return par
     
-    def delta_default(self, par, species=None, custom_par=[], 
-                      reference_par=None):
-        reference_par = get_default_parameters(species, method=self.method, 
-                      parameter_dir=self.param_dir, param_list=custom_params)
-        return reference_par + par
-    
-    def custom_delta(self, par, reference_par=None, **kwargs):
+    def delta_prediction(self, par, species=None, custom_par=[], 
+                         reference_par=None):
+        if reference_par is None:
+            reference_par = get_default_parameters(species,
+                            method=self.method, parameter_dir=self.param_dir,
+                            param_list=custom_params)
         return reference_par + par
     
 #    @staticmethod
@@ -123,7 +119,7 @@ class SEQM_singlepoint_core(torch.nn.Module):
 #    def forward(self, ctx, p):
         """ Run calculation. """
         elements = sorted(set([0] + species.reshape(-1).tolist()))
-        p_proc = self.process_prediction(pred, species=Z,
+        p_proc = self.process_prediction(pred, species=species,
                                     reference_par=custom_reference)
         learnedpar = {par:p_proc[i] for i, par in enumerate(custom_params)}
         self.settings['elements'] = torch.tensor(elements)

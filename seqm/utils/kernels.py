@@ -52,7 +52,7 @@ class ParameterKernel(torch.nn.Module):
         elements = sorted(set(Zall.tolist()))
         if any(elm not in self.elements_ref for elm in elements):
             raise ValueError("Elements in reference and call inconsistent!")
-        K = self.get_kernel_dict(Z, desc, expK=expK)
+        K = self.get_sorted_kernel(Z, desc, expK=expK)
         y = torch.zeros((Alpha.shape[0], Zall.numel()))
         Alpha_K = list(map(lambda elm :
                            torch.matmul(Alpha[:,self.idx_ref[elm]], K[elm]),

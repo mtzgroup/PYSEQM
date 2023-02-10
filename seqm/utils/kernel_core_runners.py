@@ -55,7 +55,6 @@ class AMASE_singlepoint_core(torch.nn.Module):
         return self.results[property_name]
         
     
-
 class AMASE_multirun_core(torch.nn.Module):
     #TODO: Allow for `reference_desc` to be callable
     #TODO: Typing, refactor, clean-up, docs
@@ -97,6 +96,7 @@ class AMASE_multirun_core(torch.nn.Module):
                                       custom_reference=custom_reference,
                                       seqm_settings=seqm_settings)
         self.results = {}
+        del(nondummy,Zall,desc,reference_desc)
     
     def __eq__(self, other):
         if self.__class__ != other.__class__: return False

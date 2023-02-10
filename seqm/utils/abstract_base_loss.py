@@ -10,6 +10,9 @@
 #       . enable loss functions from pytroch (at the moment: custom RSS)    #
 #       . check functionality of minimize with other (pytorch) optimizers   #
 #       . double-check GPU support!                                         #
+#       . enable optimization of only select atoms/elements (mask grad)     #
+#       . BATCHING IN `MINIMIZE`!!!!                                        #
+#       . FIND MEMORY PEAKS!!!!                                             #
 #############################################################################
 
 import torch
@@ -91,6 +94,7 @@ class AbstractLoss(ABC, torch.nn.Module):
             msg += "forces) have to be ordered according to descending "
             msg += "atomic numbers. Hint: seqm.utils.pyseqm_helpers.Orderator"
             raise ValueError(msg)
+        self.coordinates.requires_grad_(True)
         # set required shapes for reference data
         self.nMols = self.species.shape[0]
         self.nAtoms = torch.count_nonzero(self.species, dim=1)
@@ -116,7 +120,7 @@ class AbstractLoss(ABC, torch.nn.Module):
             ref = eval("self."+self.implemented_properties[i]+"_ref")
             Deltas[i] = self.loss_func(res[i], ref, nAtoms=self.nAtoms, 
                                        intensive=self.is_intensive[i])
-        return (Deltas * self.weights).sum()
+        return (Deltas * self.weights).sum() / self.nMols
         
     
     @abstractmethod
@@ -170,7 +174,6 @@ class AbstractLoss(ABC, torch.nn.Module):
         exec('self.'+prop+'_ref = ref_proc')
         self.include.append(prop2index[prop])
         
-    
     def minimize(self, x, n_epochs=4, optimizer="LBFGS", upward_thresh=5,
                  opt_kwargs={}, scheduler=None, scheduler_kwargs={}):
         """
@@ -205,10 +208,7 @@ class AbstractLoss(ABC, torch.nn.Module):
             msg  = "Unknown optimizer '"+optimizer+"'. Currently, only "
             msg += "optimizers from torch.optim are supported."
             raise ImportError(msg)
-        opt_options = {'max_iter':10, 'tolerance_grad':1e-06,
-                       'tolerance_change':1e-08, 'lr':0.5}
-        opt_options.update(opt_kwargs)
-        opt = my_opt([x], **opt_options)
+        opt = my_opt([x], **opt_kwargs)
         lr_sched = self.add_scheduler(scheduler, opt, scheduler_kwargs)
         def closure():
             if torch.is_grad_enabled(): opt.zero_grad()
@@ -218,7 +218,7 @@ class AbstractLoss(ABC, torch.nn.Module):
         Lbak, n_up, self.minimize_log = torch.inf, 0, []
         for n in range(n_epochs):
             L = opt.step(closure)
-            n_up = (L > Lbak).float() * (n_up + 1)
+            n_up = (L > Lbak).int() * (n_up + 1)
             if n_up > upward_thresh:
                 msg  = "Loss increased more than "+str(upward_thresh)
                 msg += " times. This may indicate a failure in training. "

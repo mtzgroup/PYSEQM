@@ -13,7 +13,7 @@ import torch
 from torch.autograd import grad as agrad
 from seqm.basics import Parser, Energy
 from seqm.seqm_functions.constants import Constants
-from .pyseqm_helpers import Orderator, get_default_parameters
+from .pyseqm_helpers import get_default_parameters
 
 
 LFAIL = torch.tensor(torch.inf)

@@ -13,10 +13,12 @@ import time
 #scf_backward==1: use recursive formu
 #scf_backward==2: go backward scf loop directly
 
-debug=False
 
-MAX_ITER = 1000
-SCF_BACKWARD_MAX_ITER = 10
+debug=False
+debug_backward=False
+
+MAX_ITER = 500
+SCF_BACKWARD_MAX_ITER = 25
 MAX_ITER_TO_STOP_IF_SCF_BACKWARD_DIVERGE = 5
 
 RAISE_ERROR_IF_SCF_BACKWARD_FAILS = False
@@ -601,7 +603,7 @@ class SCF(torch.autograd.Function):
             else:
                 err = torch.tensor(0.0, device=grad0.device)
 
-            if debug:
+            if debug or debug_backward:
                 t = grad0_max[converged]>backward_eps
                 print('backward scf: ', k, err.item(), t.sum().item())
             k+=1

@@ -20,7 +20,7 @@ from .seqm_core_runners import SEQM_multirun_core
 from .kernels import ParameterKernel
 
 
-LFAIL = torch.tensor(torch.inf)
+LFAIL = torch.tensor(torch.inf, requires_grad=True)
 
 torch.set_default_dtype(torch.float64)
 has_cuda = torch.cuda.is_available()
@@ -36,7 +36,8 @@ default_settings = {
                     'method'            : 'AM1',
                     'scf_eps'           : 1.0e-6,
                     'scf_converger'     : [0,0.15],
-                    'scf_backward'      : 2,
+                    'scf_backward'      : 1,
+                    'scf_backward_eps'  : 1e-4,
                     'sp2'               : sp2_def,
                     'pair_outer_cutoff' : 1.0e10,
                     'Hf_flag'           : False,
@@ -190,7 +191,7 @@ class AMASE_Loss(AbstractLoss):
         except RuntimeError:
             p.register_hook(lambda grad: grad * LFAIL)
             self.coordinates.register_hook(lambda grad: grad * LFAIL)
-            return LFAIL, LFAIL, LFAIL*torch.ones_like(self.xyz), LFAIL
+            return LFAIL, LFAIL, LFAIL*torch.ones_like(self.coordinates), LFAIL
         masking = torch.where(res[-1], LFAIL, 1.)
         Eat_fin = res[0] * masking
         Etot_fin = res[1] * masking

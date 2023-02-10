@@ -8,7 +8,6 @@
 # Current (Feb/08)                                                          #
 # TODO: . typing                                                            #
 #       . enable loss functions from pytroch (at the moment: custom RSS)    #
-#       . check functionality of minimize with other (pytorch) optimizers   #
 #       . double-check GPU support!                                         #
 #       . enable optimization of only select atoms/elements (mask grad)     #
 #       . BATCHING IN `MINIMIZE`!!!!                                        #
@@ -20,7 +19,6 @@ from warnings import warn
 from abc import ABC, abstractmethod
 from torch.autograd import grad as agrad
 from .pyseqm_helpers import prepare_array, Orderator
-
 
 torch.set_default_dtype(torch.float64)
 prop2index = {'atomization':0, 'energy':1, 'forces':2, 'gap':3}
@@ -202,6 +200,8 @@ class AbstractLoss(ABC, torch.nn.Module):
           . self.minimize_log, list: history of loss at every epoch
         
         """
+        import time
+        t0 = time.time()
         try:
             my_opt = getattr(torch.optim, optimizer)
         except AttributeError:
@@ -211,22 +211,26 @@ class AbstractLoss(ABC, torch.nn.Module):
         opt = my_opt([x], **opt_kwargs)
         lr_sched = self.add_scheduler(scheduler, opt, scheduler_kwargs)
         def closure():
-            if torch.is_grad_enabled(): opt.zero_grad()
+            opt.zero_grad()
+            L = None
             L = self(x)
             L.backward()
             return L
         Lbak, n_up, self.minimize_log = torch.inf, 0, []
         for n in range(n_epochs):
+            t = time.time()
+            print("Epoch ",n," opt.step.start  |  ",t-t0)
             L = opt.step(closure)
-            n_up = (L > Lbak).int() * (n_up + 1)
+            n_up = int(L.item() > Lbak) * (n_up + 1)
             if n_up > upward_thresh:
                 msg  = "Loss increased more than "+str(upward_thresh)
                 msg += " times. This may indicate a failure in training. "
                 msg += "You can adjust this limit via 'upward_thresh'."
                 raise RuntimeError(msg)
-            Lbak = L.clone()
+            Lbak = L.item()
+            print("Epoch ",n," Loss  ",Lbak)
             for sched in lr_sched: sched.step()
-            self.minimize_log.append(L.item())
+            self.minimize_log.append(Lbak)
         return x, L
         
     

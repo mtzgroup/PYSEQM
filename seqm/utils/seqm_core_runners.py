@@ -33,7 +33,7 @@ default_settings = {
                     'method'            : 'AM1',
                     'scf_eps'           : 1.0e-6,
                     'scf_converger'     : [0,0.15],
-                    'scf_backward'      : 1,
+                    'scf_backward'      : 2,
                     'scf_backward_eps'  : 1e-4,
                     'sp2'               : sp2_def,
                     'pair_outer_cutoff' : 1.0e10,

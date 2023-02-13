@@ -168,39 +168,38 @@ class AMASE_trainer(AbstractWrapper):
         super(AMASE_trainer, self).__init__(custom_params=custom_params, 
                                 loss_type=loss_type, loss_args=loss_args,
                                 loss_kwargs=loss_kwargs)
-        with torch.no_grad():
-            Z_ref = prepare_array(reference_Z, "atomic numbers")
-            Z_ref.requires_grad_(False)
-            if callable(reference_desc): raise NotImplementedError
-            # elements and indexing for reference structures
-            nondummy = (Z_ref > 0).reshape(-1)
-            Zall = Z_ref.reshape(-1)[nondummy]
-            self.ref_elements = sorted(set(Zall.tolist()))
-            self.ref_idx = [torch.where(Zall==elm)[0] for elm in self.ref_elements]
-            
-            # set up kernel matrix and settings
-            self.kernel = ParameterKernel(Z_ref, reference_desc)
-            self.settings = default_settings
-            self.settings.update(seqm_settings)
-            method = seqm_settings.get("method", "nomethoddefined")
-            if method == "nomethoddefined":
-                raise ValueError("`seqm_settings` has to include 'method'")
-            param_dir = seqm_settings.get("parameter_file_dir", "nodirdefined")
-            if param_dir == "nodirdefined":
-                raise ValueError("`seqm_settings` has to include 'parameter_file_dir'")
-            self.const = Constants()
-            self.settings['learned'] = custom_params
-            self.settings['eig'] = True
-            if mode == "full":
-                self.process_p = self.full_prediction
-            elif mode == "delta":
-                if custom_reference is None:
-                    self.process_p = self.default_delta
-                else:
-                    self.process_p = self.custom_delta
+        Z_ref = prepare_array(reference_Z, "atomic numbers")
+        Z_ref.requires_grad_(False)
+        if callable(reference_desc): raise NotImplementedError
+        # elements and indexing for reference structures
+        nondummy = (Z_ref > 0).reshape(-1)
+        Zall = Z_ref.reshape(-1)[nondummy]
+        self.ref_elements = sorted(set(Zall.tolist()))
+        self.ref_idx = [torch.where(Zall==elm)[0] for elm in self.ref_elements]
+        
+        # set up kernel matrix and settings
+        self.kernel = ParameterKernel(Z_ref, reference_desc)
+        self.settings = default_settings
+        self.settings.update(seqm_settings)
+        method = seqm_settings.get("method", "nomethoddefined")
+        if method == "nomethoddefined":
+            raise ValueError("`seqm_settings` has to include 'method'")
+        param_dir = seqm_settings.get("parameter_file_dir", "nodirdefined")
+        if param_dir == "nodirdefined":
+            raise ValueError("`seqm_settings` has to include 'parameter_file_dir'")
+        self.const = Constants()
+        self.settings['learned'] = custom_params
+        self.settings['eig'] = True
+        if mode == "full":
+            self.process_p = self.full_prediction
+        elif mode == "delta":
+            if custom_reference is None:
+                self.process_p = self.default_delta
             else:
-                raise ValueError("Unknown mode '"+mode+"'.")
-            self.results = {}
+                self.process_p = self.custom_delta
+        else:
+            raise ValueError("Unknown mode '"+mode+"'.")
+        self.results = {}
 
     def full_prediction(self, p, *args, **kwargs):
         return p
@@ -218,21 +217,20 @@ class AMASE_trainer(AbstractWrapper):
     
     def forward(self, A, species, coordinates, desc, expK=1, custom_reference=None):
         # elements and indexing for input structures
-        with torch.no_grad():
-            nondummy = (species > 0).reshape(-1)
-            Zall = species.reshape(-1)[nondummy]
-            elements = sorted(set(Zall.tolist()))
-            if any(elm not in self.ref_elements for elm in elements):
-                msg  = "Some element(s) of requested systems not in reference "
-                msg += "structures! Aborting."
-                raise ValueError(msg)
-            self.settings['elements'] = torch.tensor(sorted(set([0] + elements)))
-            elm_idx = [torch.where(Zall==elm)[0] for elm in elements]
-            # get HOMO and LUMO indices
-            my_parser = Parser(self.settings)
-            n_occ = my_parser(self.const, species, coordinates)[4]
-            homo = (n_occ-1).unsqueeze(-1)
-            lumo = n_occ.unsqueeze(-1)
+        nondummy = (species > 0).reshape(-1)
+        Zall = species.reshape(-1)[nondummy]
+        elements = sorted(set(Zall.tolist()))
+        if any(elm not in self.ref_elements for elm in elements):
+            msg  = "Some element(s) of requested systems not in reference "
+            msg += "structures! Aborting."
+            raise ValueError(msg)
+        self.settings['elements'] = torch.tensor(sorted(set([0] + elements)))
+        elm_idx = [torch.where(Zall==elm)[0] for elm in elements]
+        # get HOMO and LUMO indices
+        my_parser = Parser(self.settings)
+        n_occ = my_parser(self.const, species, coordinates)[4]
+        homo = (n_occ-1).unsqueeze(-1)
+        lumo = n_occ.unsqueeze(-1)
         Ks = self.kernel.get_sorted_kernel(elements, species, desc, expK=expK)
         pred = torch.zeros((len(self.custom_params), Zall.numel()))
         Alpha_K = list(map(lambda i, K : torch.matmul(A[:,i], K),
@@ -253,6 +251,7 @@ class AMASE_trainer(AbstractWrapper):
         Eat_fin = res[0] * masking
         Etot_fin = res[1] * masking
         F = -agrad(res[1].sum(), coordinates, create_graph=True)[0]
+        coordinates.requires_grad_(False)
         F_fin = F * masking[...,None,None]
         ehomo = torch.gather(res[6], 1, homo).reshape(-1)
         elumo = torch.gather(res[6], 1, lumo).reshape(-1)

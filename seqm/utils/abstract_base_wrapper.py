@@ -111,6 +111,7 @@ class AbstractWrapper(ABC, torch.nn.Module):
         self.include_loss = sorted([prop2index[prop] for prop in include])
         n_train = len(dataloader)
         Lbak, n_up, self.minimize_log = torch.inf, 0, []
+        raise RuntimeError("NEED TO DEBUG TRAINING ROUTINE/LOSS FUNCTIONS AND/OR THEIR GRADIENTS!")
         for epoch in range(n_epochs):
             L_epoch = self.train_epoch(x, dataloader)
             L_avg = L_epoch / n_train

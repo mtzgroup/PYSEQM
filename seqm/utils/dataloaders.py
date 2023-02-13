@@ -34,8 +34,8 @@ class AbstractLoader(ABC, Dataset):
     @abstractmethod
     def __getitem__(self, idx): pass
 
-    def dataloader(self, batch_size=1):
-        return DataLoader(self, batch_size=batch_size)
+    def dataloader(self, **kwargs):
+        return DataLoader(self, **kwargs)
 
 
 

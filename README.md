@@ -1,6 +1,6 @@
 # [PYSEQM: PYtorch-based Semi-Empirical Quantum Mechanics](https://github.com/lanl/PYSEQM)
 
-This is a locally-modified development version of [PYSEQM](https://github.com/lanl/PYSEQM) with significant extensions for parameter optimization and machine-learning interoperability.
+This is a locally-modified development version of [PYSEQM](https://github.com/lanl/PYSEQM) with extended differentiability, parameter optimization and machine-learning interoperability.
 
 [PYSEQM](https://github.com/lanl/PYSEQM) is a Semi-Empirical Quantum Mechanics package implemented in [PyTorch](http://pytorch.org). It provides built-in interfaces for machine learning and efficient molecular dynamic engines with GPU supported. Several molecular dynamics algorithms are implemented for facilitating dynamic simulations, inlcuding orginal and Extended Lagrangian Born-Oppenheimer Molecular Dynamics, geometric optimization and  several thermostats. 
 
@@ -12,7 +12,7 @@ This is a locally-modified development version of [PYSEQM](https://github.com/la
 * GPU-supported Molecular Dynamics Engine
 * Stable and Efficient Extended Lagrangian Born Oppenheimer Molecular Dynamics ([XL-BOMD](https://aip.scitation.org/doi/full/10.1063/1.3148075))
 * Efficient expansion algorithm [SP2](https://journals.aps.org/prb/abstract/10.1103/PhysRevB.66.155115) for generating density matrix
-* THIS VERSION: differentiable eigensolver for degenerate molecular orbitals
+* THIS VERSION: general, differentiable eigensolver for degenerate molecular orbitals
 * THIS VERSION: easy-to-use interface for parameter optimization
 * THIS VERSION: kernel-predicted SEQC parameters (incl. training routines)
 

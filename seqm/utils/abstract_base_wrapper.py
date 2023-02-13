@@ -64,7 +64,7 @@ class AbstractWrapper(ABC, torch.nn.Module):
         pass
         
     
-    def train(self, x, dataloader, n_epochs=4, include=[], optimizer="LBFGS",
+    def train(self, x, dataloader, n_epochs=4, include=[], optimizer="Adam",
               opt_kwargs={}, upward_thresh=5, scheduler=None, 
               scheduler_kwargs={}, validation_loader=None):
         """
@@ -78,12 +78,14 @@ class AbstractWrapper(ABC, torch.nn.Module):
           . n_epochs, int: number of epochs in optimization
           . include, list of str: list of properties to include in loss
           . optimizer, str: optimizer from torh.optim for running minimization
-                default: LBFGS
+                default: Adam
+                NOTE: (stochastic) LBFGS seems to give unreliable performance!
           . opt_kwargs, dict: dictionary of kwargs for optimizer, default: {}
           . upward_thresh, int: number of consecutive increasing loss to 
                 accept during minimization, default: 5
           . scheduler, str/list of str: learning rate scheduler(s) from 
                 torch.optim.lr_scheduler, default: None
+                NOTE: ReduceLROnPlateau seems to give the most/only reliable opt!
           . scheduler_kwargs, {}/list of {}: kwargs for scheduler(s)
           . validation_loader, torch.utils.data.Dataloader: dataloader for validation
                 (see seqm.utils.dataloaders)
@@ -111,10 +113,11 @@ class AbstractWrapper(ABC, torch.nn.Module):
         self.include_loss = sorted([prop2index[prop] for prop in include])
         n_train = len(dataloader)
         Lbak, n_up, self.minimize_log = torch.inf, 0, []
-        raise RuntimeError("NEED TO DEBUG TRAINING ROUTINE/LOSS FUNCTIONS AND/OR THEIR GRADIENTS!")
+        logmsg  = "\n  SEQC OPTIMIZATION BROUGHT TO YOU BY SLOWCODE, INC."
+        logmsg += "\n"+"-"*73
+        print(logmsg)
         for epoch in range(n_epochs):
             L_epoch = self.train_epoch(x, dataloader)
-            L_avg = L_epoch / n_train
             n_up = int(L_epoch > Lbak) * (n_up + 1)
             if n_up > upward_thresh:
                 msg  = "Loss increased more than "+str(upward_thresh)
@@ -123,23 +126,30 @@ class AbstractWrapper(ABC, torch.nn.Module):
                 raise RuntimeError(msg)
             Lbak = L_epoch
             if validation_loader is not None:
-                n_val = len(validation_loader)
-                with torch.no_grad():
-                    L_val = self.validate_epoch(x, validation_loader)
-                L_valout = '{0:6.4e}'.format(L_val/n_val)
+                x.requires_grad_(False)
+                L_val = self.validate_epoch(x, validation_loader)
+                L_valout = '{0:6.4e}'.format(L_val)
+                x.requires_grad_(True)
             else:
                 L_valout = "no validation"
-            logmsg  = "Epoch {0:5d}:   Train Loss = {1:6.4e}".format(epoch, L_avg)
+            logmsg  = "Epoch {0:5d}:   Train Loss = {1:6.4e}".format(epoch, L_epoch)
             logmsg += "   |   Validation Loss = "+L_valout
             print(logmsg)
-            for sched in lr_sched: sched.step()
-            self.minimize_log.append(L_avg)
-        return x, L_avg
+            for sched in lr_sched: sched.step(metrics=L_epoch)
+            self.minimize_log.append(L_epoch)
+        L_end = self.get_loss(x, dataloader)
+        self.minimize_log.append(L_end)
+        logmsg  = "-"*73+"\n"
+        logmsg += "Final:         Train Loss = {0:6.4e}".format(L_end)
+        logmsg += "   |   Validation Loss = "+L_valout
+        print(logmsg)
+        return x, L_end
         
     
     def train_epoch(self, x, dataloader):
-        Ltot = 0.
+        Ltot, ntot = 0., 0.
         for (inputs, refs, weights) in dataloader:
+            ntot += inputs[0].shape[0]
             nAtoms = torch.count_nonzero(inputs[0], dim=1)
             def closure():
                 self.opt.zero_grad()
@@ -151,19 +161,33 @@ class AbstractWrapper(ABC, torch.nn.Module):
                 return loss
             L = self.opt.step(closure)
             Ltot += L.item()
-        return Ltot
+        return Ltot / ntot
         
     
     def validate_epoch(self, x, validation_loader):
-        Lval = 0.
+        Lval, nval = 0., 0.
         for (inputs, refs, weights) in validation_loader:
+            nval += inputs[0].shape[0]
             nAtoms = torch.count_nonzero(inputs[0], dim=1)
             res = self(x, *inputs)
             loss = self.loss_func(res, refs, nAtoms=nAtoms, 
                             weights=weights, include=self.include_loss,
                             extensive=self.is_extensive)
             Lval += loss.item()
-        return Lval
+        return Lval / nval
+        
+    
+    def get_loss(self, x, dataloader):
+        Ltot, ntot = 0., 0.
+        for (inputs, refs, weights) in dataloader:
+            ntot += inputs[0].shape[0]
+            nAtoms = torch.count_nonzero(inputs[0], dim=1)
+            res = self(x, *inputs)
+            L = self.loss_func(res, refs, nAtoms=nAtoms,
+                               weights=weights, include=self.include_loss,
+                               extensive=self.is_extensive)
+            Ltot += L.item()
+        return Ltot / ntot
         
     
     def add_scheduler(self, scheduler, optimizer, sched_kwargs={}):
@@ -189,7 +213,13 @@ class AbstractWrapper(ABC, torch.nn.Module):
             for i, s in enumerate(scheduler):
                 try:
                     my_sched = getattr(torch.optim.lr_scheduler, s)
-                    lr_sched.append(my_sched(optimizer, **sched_kwargs[i]))
+                    sched_inst = my_sched(optimizer, **sched_kwargs[i])
+                    if s not in ["ReduceLROnPlateau"]:
+                        step_bak = sched_inst.step
+                        def step_new(metrics=0., **kwargs):
+                            step_bak(**kwargs)
+                        sched_inst.step = step_new
+                    lr_sched.append(sched_inst)
                 except AttributeError:
                     msg  = "Unknown scheduler '"+s+"'. Currently, only "
                     msg += "schedulers in torch.optim.lr_scheduler supported"
@@ -198,7 +228,13 @@ class AbstractWrapper(ABC, torch.nn.Module):
         elif isinstance(scheduler, str):
             try:
                 my_sched = getattr(torch.optim.lr_scheduler, scheduler)
-                return [my_sched(optimizer, **sched_kwargs)]
+                sched_inst = my_sched(optimizer, **sched_kwargs)
+                if scheduler not in ["ReduceLROnPlateau"]:
+                    step_bak = sched_inst.step
+                    def step_new(metrics=0., **kwargs):
+                        step_bak(**kwargs)
+                    sched_inst.step = step_new
+                return [sched_inst]
             except AttributeError:
                 msg  = "Unknown scheduler '"+scheduler+"'. Currently, only "
                 msg += "schedulers in torch.optim.lr_scheduler supported"

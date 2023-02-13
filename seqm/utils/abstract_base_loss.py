@@ -1,17 +1,10 @@
 #############################################################################
-# Base class and functionality of loss modules for SEQC                     #
+# !STUB!: Base class and functionality of loss modules for SEQC             #
 #  - NoScheduler: dummy scheduler (simple pass)                             #
-#  - RSSperAtom: residual sum of squares loss (weighted by number of atoms  #
-#                for extensive properties                                   #
 #  - AbstractLoss: abstract base class as template for loss modules         #
 #                                                                           #
-# Current (Feb/08)                                                          #
-# TODO: . typing                                                            #
-#       . enable loss functions from pytroch (at the moment: custom RSS)    #
-#       . double-check GPU support!                                         #
-#       . enable optimization of only select atoms/elements (mask grad)     #
-#       . BATCHING IN `MINIMIZE`!!!!                                        #
-#       . FIND MEMORY PEAKS!!!!                                             #
+# As of Feb/12: stub                                                        #
+# TODO: . MOVE TO AbstractWrapper IMPLEMENTATION!!!!                        #
 #############################################################################
 
 import torch
@@ -211,8 +204,7 @@ class AbstractLoss(ABC, torch.nn.Module):
         opt = my_opt([x], **opt_kwargs)
         lr_sched = self.add_scheduler(scheduler, opt, scheduler_kwargs)
         def closure():
-            opt.zero_grad()
-            L = None
+            opt.zero_grad(set_to_none=True) #does set_to_none help?
             L = self(x)
             L.backward()
             return L
@@ -259,7 +251,7 @@ class AbstractLoss(ABC, torch.nn.Module):
                     my_sched = getattr(torch.optim.lr_scheduler, s)
                     lr_sched.append(my_sched(optimizer, **sched_kwargs[i]))
                 except AttributeError:
-                    msg  = "Unknown scheduler '"+sched+"'. Currently, only "
+                    msg  = "Unknown scheduler '"+s+"'. Currently, only "
                     msg += "schedulers in torch.optim.lr_scheduler supported"
                     raise ImportError(msg)
             return lr_sched
@@ -283,4 +275,3 @@ class AbstractLoss(ABC, torch.nn.Module):
         return dLdx
         
     
-

@@ -11,15 +11,17 @@ class ParameterKernel(torch.nn.Module):
         if not isinstance(desc_ref, list) and torch.is_tensor(desc_ref[0]):
             msg = "Descriptors have to be provided as list of tensors!"
             raise ValueError(msg)
-        nondummy = (Z_ref > 0).reshape(-1)
-        Zall = Z_ref.reshape(-1)[nondummy]
-        self.elements_ref = sorted(set(Zall.tolist()))
-        self.X_ref, self.idx_ref = {}, {}
-        for elm in self.elements_ref:
-            idx   = [torch.where(s==elm)[0] for s in Z_ref]
-            X_elm = torch.cat([d[idx[i]] for i, d in enumerate(desc_ref)])
-            self.X_ref[elm]   = X_elm
-            self.idx_ref[elm] = torch.where(Zall==elm)[0]
+        with torch.no_grad():
+            nondummy = (Z_ref > 0).reshape(-1)
+            Zall = Z_ref.reshape(-1)[nondummy]
+            self.elements_ref = sorted(set(Zall.tolist()))
+            self.X_ref, self.idx_ref = {}, {}
+            for elm in self.elements_ref:
+                idx   = [torch.where(s==elm)[0] for s in Z_ref]
+                X_elm = torch.cat([d[idx[i]] for i, d in enumerate(desc_ref)])
+                X_elm.requires_grad_(False)
+                self.X_ref[elm]   = X_elm
+                self.idx_ref[elm] = torch.where(Zall==elm)[0]
     
     def __eq__(self, other):
         if self.__class__ != other.__class__: return False

@@ -115,7 +115,7 @@ def scf_forward1(M, w, gss, gpp, gsp, gp2, hsp, \
     nDirect1 = 2
     notconverged = torch.ones(nmol,dtype=torch.bool, device=M.device)
 
-    k=0
+    k = 0
     F = fock(nmol, molsize, P, M, maskd, mask, idxi, idxj, w, gss, gpp, gsp, gp2, hsp)
     err = torch.ones(nmol, dtype=P.dtype, device=P.device)
     Pnew = torch.zeros_like(P)
@@ -557,7 +557,7 @@ class SCF(torch.autograd.Function):
                               atom_molid, pair_molid)
         #
         return P, notconverged
-
+    
     @staticmethod
     def backward(ctx, grad0, grad1):
         #use recursive formula

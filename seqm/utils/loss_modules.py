@@ -80,12 +80,12 @@ class elementwiseSEQM_Loss(AbstractLoss):
     def __init__(self, species, coordinates, custom_params=[], mode="full",
             seqm_settings={}, custom_reference=None, loss_type="RSSperAtom",
             loss_args=(), loss_kwargs={}):
-        super(SEQM_Loss, self).__init__(species, coordinates,
+        super(elementwiseSEQM_Loss, self).__init__(species, coordinates,
                         custom_params=custom_params, loss_type=loss_type,
                         loss_args=loss_args, loss_kwargs=loss_kwargs)
         # create maps for elementwise parameters (input) to actual parameters
-        nondummy = (Z > 0).reshape(-1)
-        self.Zall = Z.reshape(-1)[nondummy]
+        nondummy = (self.species > 0).reshape(-1)
+        Zall = self.species.reshape(-1)[nondummy]
         real_elements = sorted(set([0]+Zall.tolist()), reverse=True)[:-1]
         self.elm_map = [real_elements.index(z) for z in Zall]
         self.runner = SEQM_multirun_core(self.species, self.coordinates,
@@ -102,7 +102,7 @@ class elementwiseSEQM_Loss(AbstractLoss):
                 p_elm[i,j]: parameter custom_params[i] for element j, where
                 elements are ordered in descending order.
         """
-        p = torch.stack([p_elm[:,map_i] for map_i in elm_map]).T
+        p = torch.stack([p_elm[:,map_i] for map_i in self.elm_map]).T
         return self.runner(p)
         
     
@@ -119,63 +119,66 @@ class AMASE_Loss(AbstractLoss):
         super(AMASE_Loss, self).__init__(species, coordinates,
                         custom_params=custom_params, loss_type=loss_type,
                         loss_args=loss_args, loss_kwargs=loss_kwargs)
-        Z_ref = prepare_array(reference_Z, "atomic numbers")
-        if callable(reference_desc): raise NotImplementedError
-        if callable(desc): raise NotImplementedError
-        # elements and indexing for input structures
-        nondummy = (self.species > 0).reshape(-1)
-        Zall = self.species.reshape(-1)[nondummy]
-        elements = sorted(set(Zall.tolist()))
-        self.elm_idx = [torch.where(Zall==elm)[0] for elm in elements]
-        self.p_shape = (len(custom_params), Zall.numel())
-        # elements and indexing for reference structures
-        nondummy = (Z_ref > 0).reshape(-1)
-        Zall = Z_ref.reshape(-1)[nondummy]
-        ref_elements = sorted(set(Zall.tolist()))
-        if any(elm not in ref_elements for elm in elements):
-            msg  = "Some element(s) of requested systems not in reference "
-            msg += "structures! Aborting."
-            raise ValueError(msg)
-        self.ref_idx = [torch.where(Zall==elm)[0] for elm in ref_elements]
-        
-        # build kernel matrix
-        kernel = ParameterKernel(Z_ref, reference_desc)
-        self.K = kernel.get_sorted_kernel(elements, self.species, desc, expK=expK)
-        # set up multirun calculator
-        settings = default_settings
-        settings.update(seqm_settings)
-        method = seqm_settings.get("method", "nomethoddefined")
-        if method == "nomethoddefined":
-            raise ValueError("`seqm_settings` has to include 'method'")
-        param_dir = seqm_settings.get("parameter_file_dir", "nodirdefined")
-        if param_dir == "nodirdefined":
-            raise ValueError("`seqm_settings` has to include 'parameter_file_dir'")
-        self.const = Constants()
-        self.custom_par = custom_params
-        settings['elements'] = torch.tensor(sorted(set([0] + elements)))
-        settings['learned'] = custom_params
-        settings['eig'] = True
-        # default parameters for method (as reference or as template)
-        p_def = get_default_parameters(species, method=method,
-                    parameter_dir=param_dir, param_list=custom_params)
-        # set `self.p0` depending on `mode` (final `p` = input + `self.p0`)
-        if mode == "full":
-            self.p0 = torch.zeros_like(p_def)
-        elif mode == "delta":
-            if custom_reference is None:
-                self.p0 = p_def.clone()
+        with torch.no_grad():
+            Z_ref = prepare_array(reference_Z, "atomic numbers")
+            Z_ref.requires_grad_(False)
+            if callable(reference_desc): raise NotImplementedError
+            if callable(desc): raise NotImplementedError
+            # elements and indexing for input structures
+            nondummy = (self.species > 0).reshape(-1)
+            Zall = self.species.reshape(-1)[nondummy]
+            elements = sorted(set(Zall.tolist()))
+            self.elm_idx = [torch.where(Zall==elm)[0] for elm in elements]
+            self.p_shape = (len(custom_params), Zall.numel())
+            # elements and indexing for reference structures
+            nondummy = (Z_ref > 0).reshape(-1)
+            Zall = Z_ref.reshape(-1)[nondummy]
+            ref_elements = sorted(set(Zall.tolist()))
+            if any(elm not in ref_elements for elm in elements):
+                msg  = "Some element(s) of requested systems not in reference "
+                msg += "structures! Aborting."
+                raise ValueError(msg)
+            self.ref_idx = [torch.where(Zall==elm)[0] for elm in ref_elements]
+            
+            # build kernel matrix
+            kernel = ParameterKernel(Z_ref, reference_desc)
+            self.K = kernel.get_sorted_kernel(elements, self.species, desc, expK=expK)
+            self.K.requires_grad_(False)
+            # set up multirun calculator
+            settings = default_settings
+            settings.update(seqm_settings)
+            method = seqm_settings.get("method", "nomethoddefined")
+            if method == "nomethoddefined":
+                raise ValueError("`seqm_settings` has to include 'method'")
+            param_dir = seqm_settings.get("parameter_file_dir", "nodirdefined")
+            if param_dir == "nodirdefined":
+                raise ValueError("`seqm_settings` has to include 'parameter_file_dir'")
+            self.const = Constants()
+            self.custom_par = custom_params
+            settings['elements'] = torch.tensor(sorted(set([0] + elements)))
+            settings['learned'] = custom_params
+            settings['eig'] = True
+            # default parameters for method (as reference or as template)
+            p_def = get_default_parameters(species, method=method,
+                        parameter_dir=param_dir, param_list=custom_params)
+            # set `self.p0` depending on `mode` (final `p` = input + `self.p0`)
+            if mode == "full":
+                self.p0 = torch.zeros_like(p_def)
+            elif mode == "delta":
+                if custom_reference is None:
+                    self.p0 = p_def.clone()
+                else:
+                    self.p0 = custom_reference
             else:
-                self.p0 = custom_reference
-        else:
-            raise ValueError("Unknown mode '"+mode+"'.")
-        self.p0.requires_grad_(False)
-        self.calc = Energy(settings)
-        # get HOMO and LUMO indices
-        my_parser = Parser(self.calc.seqm_parameters)
-        n_occ = my_parser(self.const, self.species, self.coordinates)[4]
-        self.homo = (n_occ-1).unsqueeze(-1)
-        self.lumo = n_occ.unsqueeze(-1)
-        self.results = {}
+                raise ValueError("Unknown mode '"+mode+"'.")
+            self.p0.requires_grad_(False)
+            self.calc = Energy(settings)
+            # get HOMO and LUMO indices
+            my_parser = Parser(self.calc.seqm_parameters)
+            n_occ = my_parser(self.const, self.species, self.coordinates)[4]
+            self.homo = (n_occ-1).unsqueeze(-1)
+            self.lumo = n_occ.unsqueeze(-1)
+            self.results = {}
         
     
     def run_calculation(self, A):
@@ -192,7 +195,7 @@ class AMASE_Loss(AbstractLoss):
             p.register_hook(lambda grad: grad * LFAIL)
             self.coordinates.register_hook(lambda grad: grad * LFAIL)
             return LFAIL, LFAIL, LFAIL*torch.ones_like(self.coordinates), LFAIL
-        masking = torch.where(res[-1], LFAIL, 1.)
+        with torch.no_grad(): masking = torch.where(res[-1], LFAIL, 1.)
         Eat_fin = res[0] * masking
         Etot_fin = res[1] * masking
         F = -agrad(res[1].sum(), self.coordinates, create_graph=True)[0]
@@ -209,3 +212,5 @@ class AMASE_Loss(AbstractLoss):
         
     
 
+
+    

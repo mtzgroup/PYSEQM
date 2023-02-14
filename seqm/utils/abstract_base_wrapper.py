@@ -65,7 +65,7 @@ class AbstractWrapper(ABC, torch.nn.Module):
         
     
     def train(self, x, dataloader, n_epochs=4, include=[], optimizer="Adam",
-              opt_kwargs={}, upward_thresh=5, scheduler=None, 
+              opt_kwargs={}, n_up_thresh=5, up_thresh=1e-4, scheduler=None, 
               scheduler_kwargs={}, validation_loader=None):
         """
         Generic routine for minimizing loss.
@@ -85,8 +85,10 @@ class AbstractWrapper(ABC, torch.nn.Module):
                     - Adam, single-epoch LBFGS appear to work OK
                     - Adagrad, Rprop seem stable, but veeeery slow
           . opt_kwargs, dict: dictionary of kwargs for optimizer, default: {}
-          . upward_thresh, int: number of consecutive increasing loss to 
+          . n_up_thresh, int: number of consecutive increasing loss to 
                 accept during minimization, default: 5
+          . up_thresh, float: criterion to decide whether loss increased
+                (allows to ignore small increases), default: 1e-4
           . scheduler, str/list of str: learning rate scheduler(s) from 
                 torch.optim.lr_scheduler, default: None
                 NOTE: ReduceLROnPlateau seems to give the most/only reliable opt!
@@ -120,10 +122,22 @@ class AbstractWrapper(ABC, torch.nn.Module):
         logmsg  = "\n  SEQC OPTIMIZATION BROUGHT TO YOU BY SLOWCODE, INC."
         logmsg += "\n"+"-"*73
         print(logmsg)
+        L_start = self.get_loss(x, dataloader)
+        self.minimize_log.append(L_start)
+        if validation_loader is not None:
+            x.requires_grad_(False)
+            L_val = self.validate_epoch(x, validation_loader)
+            L_valout = '{0:6.4e}'.format(L_val)
+            x.requires_grad_(True)
+        else:
+            L_valout = "no validation"
+        logmsg  = "Start:         Train Loss = {0:6.4e}".format(L_start)
+        logmsg += "   |   Validation Loss = "+L_valout
+        print(logmsg)
         for epoch in range(n_epochs):
             L_epoch = self.train_epoch(x, dataloader)
-            n_up = int(L_epoch > Lbak) * (n_up + 1)
-            if n_up > upward_thresh:
+            n_up = int(L_epoch - Lbak > up_thresh) * (n_up + 1)
+            if n_up > n_up_thresh:
                 msg  = "Loss increased more than "+str(upward_thresh)
                 msg += " times. This may indicate a failure in training. "
                 msg += "You can adjust this limit via 'upward_thresh'."

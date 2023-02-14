@@ -79,7 +79,11 @@ class AbstractWrapper(ABC, torch.nn.Module):
           . include, list of str: list of properties to include in loss
           . optimizer, str: optimizer from torh.optim for running minimization
                 default: Adam
-                NOTE: (stochastic) LBFGS seems to give unreliable performance!
+                NOTES:
+                    - stochastic LBFGS, AdamW, Adadelta, SGD, ASGD seem unreliable!
+                    - Nadam questionable (careful choice of settings)
+                    - Adam, single-epoch LBFGS appear to work OK
+                    - Adagrad, Rprop seem stable, but veeeery slow
           . opt_kwargs, dict: dictionary of kwargs for optimizer, default: {}
           . upward_thresh, int: number of consecutive increasing loss to 
                 accept during minimization, default: 5

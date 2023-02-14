@@ -4,7 +4,8 @@
 #                extensive properties                                       #
 #                                                                           #
 # Current (Feb/12)                                                          #
-# TODO: . typing                                                            #
+# TODO: . enable access to individual losses                                #
+#       . typing                                                            #
 #       . enable loss functions from pytroch (at the moment: custom RSS)    #
 #############################################################################
 

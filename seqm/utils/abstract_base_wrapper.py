@@ -65,8 +65,8 @@ class AbstractWrapper(ABC, torch.nn.Module):
         
     
     def train(self, x, dataloader, n_epochs=4, include=[], optimizer="Adam",
-              opt_kwargs={}, n_up_thresh=5, up_thresh=1e-4, scheduler=None, 
-              scheduler_kwargs={}, validation_loader=None):
+              opt_kwargs={}, n_up_thresh=5, up_thresh=1e-4, loss_converged=1e-8,
+              scheduler=None, scheduler_kwargs={}, validation_loader=None):
         """
         Generic routine for minimizing loss.
         
@@ -89,6 +89,7 @@ class AbstractWrapper(ABC, torch.nn.Module):
                 accept during minimization, default: 5
           . up_thresh, float: criterion to decide whether loss increased
                 (allows to ignore small increases), default: 1e-4
+          . loss_converged, float: convergence criterion for loss, default 1e-8
           . scheduler, str/list of str: learning rate scheduler(s) from 
                 torch.optim.lr_scheduler, default: None
                 NOTE: ReduceLROnPlateau seems to give the most/only reliable opt!
@@ -136,6 +137,9 @@ class AbstractWrapper(ABC, torch.nn.Module):
         print(logmsg)
         for epoch in range(n_epochs):
             L_epoch = self.train_epoch(x, dataloader)
+            if L_epoch < loss_converged:
+                print("Reached convergence criterion {0:3.2e}.".format(loss_converged))
+                break
             n_up = int(L_epoch - Lbak > up_thresh) * (n_up + 1)
             if n_up > n_up_thresh:
                 msg  = "Loss increased more than "+str(upward_thresh)

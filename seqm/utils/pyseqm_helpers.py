@@ -264,7 +264,7 @@ def prepare_array(x, label):
             convmsg += "(1,nAtoms) for consistency.\n"
             convmsg += "You probably intended to run a single molecule and "
             convmsg += "if so, this will give the correct behavior. "
-            convmsg += "If not, please check you input!"
+            convmsg += "If not, please check your input!"
             warn(convmsg)
             x_proc = torch.tensor([x])
         else:
@@ -278,7 +278,7 @@ def prepare_array(x, label):
             convmsg += "(1,nAtoms) for consistency.\n"
             convmsg += "You probably intended to run a single molecule and "
             convmsg += "if so, this will give the correct behavior. "
-            convmsg += "If not, please check you input!"
+            convmsg += "If not, please check your input!"
             warn(convmsg)
             x_proc = torch.tensor([x])
         elif dim_individual in [1,2]:

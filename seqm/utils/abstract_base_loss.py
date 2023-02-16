@@ -193,8 +193,6 @@ class AbstractLoss(ABC, torch.nn.Module):
           . self.minimize_log, list: history of loss at every epoch
         
         """
-        import time
-        t0 = time.time()
         try:
             my_opt = getattr(torch.optim, optimizer)
         except AttributeError:
@@ -210,8 +208,6 @@ class AbstractLoss(ABC, torch.nn.Module):
             return L
         Lbak, n_up, self.minimize_log = torch.inf, 0, []
         for n in range(n_epochs):
-            t = time.time()
-            print("Epoch ",n," opt.step.start  |  ",t-t0)
             L = opt.step(closure)
             n_up = int(L.item() > Lbak) * (n_up + 1)
             if n_up > upward_thresh:

@@ -120,20 +120,20 @@ class SEQM_singlepoint_core(torch.nn.Module):
 #    def forward(self, ctx, p):
         """ Run calculation. """
         elements = sorted(set([0] + species.reshape(-1).tolist()))
-        p_proc = self.process_prediction(pred, species=species,
+        p_proc = self.process_prediction(p, species=species,
                                     reference_par=custom_reference)
         learnedpar = {par:p_proc[i] for i, par in enumerate(custom_params)}
         self.settings['elements'] = torch.tensor(elements)
         self.settings['learned'] = custom_params
         self.settings['eig'] = True
         calc = Energy(self.settings)
-        try:
-            res = calc(self.const, coordinates, species, learnedpar, 
+#        try:
+        res = calc(self.const, coordinates, species, learnedpar, 
                        all_terms=True)
-        except RuntimeError:
-            p.register_hook(lambda grad: grad * torch.nan)
-            coordinates.register_hook(lambda grad: grad * LFAIL)
-            return LFAIL, LFAIL, LFAIL*torch.ones_like(xyz), LFAIL
+#        except RuntimeError:
+#            p.register_hook(lambda grad: grad * torch.nan)
+#            coordinates.register_hook(lambda grad: grad * LFAIL)
+#            return LFAIL, LFAIL, LFAIL*torch.ones_like(xyz), LFAIL
         masking = torch.where(res[-1], LFAIL, 1.)
         # atomization and total energy
         Eat_fin = res[0] * masking

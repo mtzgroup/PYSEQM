@@ -293,6 +293,12 @@ class AMASE_multirun(torch.nn.Module):
         return self.results[property_name]
         
     
+
+
+#### NEW IMPLEMENTATIONS ####
+
+
+
 class elementwiseSEQM_trainer(AbstractWrapper):
     """
     Concrete wrapper for SEQC calculations with elementwise parameters.
@@ -331,6 +337,46 @@ class elementwiseSEQM_trainer(AbstractWrapper):
         real_elements = sorted(set([0]+Zall.tolist()), reverse=True)[:-1]
         elm_map = [real_elements.index(z) for z in Zall]
         p = torch.stack([p_elm[:,map_i] for map_i in elm_map]).T
+        coordinates.requires_grad_(True)
+        res = self.core_runner(p, species, coordinates,
+                               custom_params=self.custom_params,
+                               custom_reference=custom_reference)
+        self.results = self.core_runner.results
+        return res
+        
+    
+class SEQM_trainer(AbstractWrapper):
+    """
+    Concrete wrapper for SEQC calculations with atomwise parameters.
+    
+    Parameters at instantiation:
+    ----------------------------
+      . custom_params, list: names of custom parameters (to optimize)
+      . mode, str: if 'full' learn total parameters, 'delta': learn Delta
+      . seqm_settings, dict: settings for SEQC calculations
+    """
+    def __init__(self, custom_params=None, seqm_settings=None, mode="full",
+                 loss_type="RSSperAtom", loss_args=(), loss_kwargs={}):
+        super(SEQM_trainer, self).__init__(custom_params=custom_params,
+                                loss_type=loss_type, loss_args=loss_args,
+                                loss_kwargs=loss_kwargs)
+        self.custom_params = custom_params
+        self.core_runner = SEQM_singlepoint_core(seqm_settings, mode=mode)
+    
+    def forward(self, p, species, coordinates, custom_reference=None):
+        """
+        Gather results of SEQC calculation with elementwise custom parameters.
+        
+        Parameters:
+        -----------
+          . p, torch.Tensor: custom parameters for atoms. Ordering:
+                p[i,j]: parameter custom_params[i] for atom j, where
+                atoms (in each molecule) are ordered in descending order.
+          . species, list/torch.Tensor: atomic numbers in descending order
+          . coordinates, list/torch.Tensor: coordinates ordered accordingly
+          . custom_reference, torch.Tensor: if in 'delta' mode:
+            p = custom_reference + input, default: use standard parameters
+        """
         coordinates.requires_grad_(True)
         res = self.core_runner(p, species, coordinates,
                                custom_params=self.custom_params,

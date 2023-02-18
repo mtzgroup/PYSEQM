@@ -149,9 +149,9 @@ class AbstractWrapper(ABC, torch.nn.Module):
                 break
             n_up = int(DeltaL > up_thresh) * (n_up + 1)
             if n_up > n_up_thresh:
-                msg  = "Loss increased more than "+str(up_thresh)
-                msg += " times. This may indicate a failure in training. "
-                msg += "You can adjust this limit via 'up_thresh'."
+                msg  = "Loss increased by {0:3.1e} more than ".format(up_thresh)
+                msg += str(n_up_thresh)+" times. This may indicate a failure in"
+                msg += " training. You can adjust this limit via 'up_thresh'."
                 raise RuntimeError(msg)
             Lbak = L_epoch
             if validation_loader is not None:

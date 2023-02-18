@@ -24,27 +24,24 @@ class AMASE_singlepoint_core(torch.nn.Module):
     #TODO: Allow for `reference_desc` to be callable
     #TODO: Typing, some refactoring, clean-up, docs
     def __init__(self, reference_Z, reference_desc, reference_coordinates=None,
-                 seqm_settings={}, mode="full"):
+                 seqm_settings={}, mode="full", custom_params=[],
+                 use_custom_reference=False):
         super(AMASE_singlepoint_core, self).__init__()
         self.n_ref = torch.count_nonzero(reference_Z)
         if callable(reference_desc): raise NotImplementedError
-        self.custom_params = custom_params
         self.kernel = ParameterKernel(reference_Z, reference_desc)
-        self.seqm_runner = SEQM_singlepoint_core(seqm_settings, mode=mode)
+        self.seqm_runner = SEQM_singlepoint_core(seqm_settings, mode=mode,
+                                custom_params=custom_params,
+                                use_custom_reference=use_custom_reference)
         self.results = {}
     
     def __eq__(self, other):
         if self.__class__ != other.__class__: return False
         return self.__dict__ == other.__dict__
     
-    def forward(self, Alpha, Z, positions, desc, custom_params=[], 
-                custom_reference=None, expK=1):
-        msg = "`Alpha` inconsistent with (`custom_params`, number of references)"
-        assert (Alpha.shape == (len(custom_params),self.n_ref)), msg
-        if callable(desc): raise NotImplementedError
+    def forward(self, Alpha, Z, positions, desc, custom_reference=None, expK=1):
         pred = self.kernel(Alpha, Z, desc, expK=expK)
         res = self.seqm_runner(pred, Z, positions, 
-                               custom_params=custom_params,
                                custom_reference=custom_reference)
         self.results = self.seqm_runner.results
         return res

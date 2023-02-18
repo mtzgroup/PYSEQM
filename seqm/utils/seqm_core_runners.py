@@ -53,7 +53,11 @@ class SEQM_singlepoint_core(torch.nn.Module):
       . seqm_settings, dict: settings for SEQC calculation
       . mode, str: if 'full', input parameters of call are SEQC parameters
                    if 'delta', SEQC parameters = input + reference params
-            default: 'full'
+                   default: 'full'
+      . custom_params, list of str: names of custom parameters in p
+            default: [] (i.e., use only standard parameters)
+      . use_custom_reference, bool: whether to use custom reference parameters
+                   for 'delta' mode (p = input + custom_reference)
     
     Parameters at call/forward:
       . p, torch.Tensor: SEQC parameters (or Delta parameters in 'delta' mode)
@@ -79,50 +83,62 @@ class SEQM_singlepoint_core(torch.nn.Module):
             (accessible through self.get_property(prop)
     
     """
-    def __init__(self, seqm_settings={}, mode="full"):
+    def __init__(self, seqm_settings={}, mode="full", custom_params=[],
+                 use_custom_reference=False):
         super(SEQM_singlepoint_core, self).__init__()
         self.settings = default_settings
         self.settings.update(seqm_settings)
         self.param_dir = seqm_settings.get("parameter_file_dir", "nodirdefined")
+        self.custom_params = custom_params
         self.method = seqm_settings.get("method", "nomethoddefined")
         if self.method == "nomethoddefined":
             raise ValueError("`seqm_settings` has to include 'method'")
         # set preprocessing of input -> SEQC parameters depending on `mode`
+        param_dir = seqm_settings.get("parameter_file_dir", "nodirdefined")
         if mode == "full":
             self.process_prediction = self.full_prediction
         elif mode == "delta":
-            self.process_prediction = self.delta_prediction
+            if use_custom_reference is False:
+                if param_dir == "nodirdefined":
+                    msg  = "In 'delta' mode, `seqm_settings` has to include "
+                    msg += "'parameter_file_dir'"
+                    raise ValueError(msg)
+                self.process_prediction = self.default_delta
+            else:
+                self.process_prediction = self.custom_delta
         else:
             raise ValueError("Unknown mode '"+mode+"'.")
         self.const = Constants()
         self.results = {}
-    
+
     def __eq__(self, other):
         if self.__class__ != other.__class__: return False
         return self.__dict__ == other.__dict__
-    
+
     def full_prediction(self, par, **kwargs):
         return par
-    
-    def delta_prediction(self, par, species=None, custom_par=[], 
-                         reference_par=None):
-        if reference_par is None:
-            reference_par = get_default_parameters(species,
-                            method=self.method, parameter_dir=self.param_dir,
-                            param_list=custom_params)
-        return reference_par + par
+
+    def default_delta(self, par, species=None, **kwargs):
+        p0 = get_default_parameters(species, method=self.settings["method"],
+                        parameter_dir=self.settings["parameter_file_dir"],
+                        param_list=self.custom_params).to(device)
+        p0.requires_grad_(False)
+        return par + p0
+
+    def custom_delta(self, par, custom_ref=None, **kwargs):
+        custom_ref.requires_grad_(False)
+        return par + custom_ref
     
 #    @staticmethod
-    def forward(self, p, species, coordinates, custom_params=[],
-                custom_reference=None):
+    def forward(self, p, species, coordinates, custom_reference=None):
 #    TODO: NEED CUSTOM BACKWARD FOR WHEN CALCULTION FAILS (RETURN NaN).
 #          IS p.register_hook(lambda grad: grad * NaN) working?
 #    def forward(self, ctx, p):
         """ Run calculation. """
         elements = sorted(set([0] + species.reshape(-1).tolist()))
-        p_proc = self.process_prediction(p, species=species,
-                                    reference_par=custom_reference)
-        learnedpar = {par:p_proc[i] for i, par in enumerate(custom_params)}
+        p_in = self.process_prediction(p, species=species,
+                                       reference_par=custom_reference)
+        learnedpar = {par:p_in[i] for i, par in enumerate(self.custom_params)}
         self.settings['elements'] = torch.tensor(elements)
         self.settings['learned'] = custom_params
         self.settings['eig'] = True

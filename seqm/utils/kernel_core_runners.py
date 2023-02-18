@@ -35,10 +35,6 @@ class AMASE_singlepoint_core(torch.nn.Module):
                                 use_custom_reference=use_custom_reference)
         self.results = {}
     
-    def __eq__(self, other):
-        if self.__class__ != other.__class__: return False
-        return self.__dict__ == other.__dict__
-    
     def forward(self, Alpha, Z, positions, desc, custom_reference=None, expK=1):
         pred = self.kernel(Alpha, Z, desc, expK=expK)
         res = self.seqm_runner(pred, Z, positions, 
@@ -94,10 +90,6 @@ class AMASE_multirun_core(torch.nn.Module):
                                       seqm_settings=seqm_settings)
         self.results = {}
         del(nondummy,Zall,desc,reference_desc)
-    
-    def __eq__(self, other):
-        if self.__class__ != other.__class__: return False
-        return self.__dict__ == other.__dict__
     
     def forward(self, Alpha):
         pred = torch.zeros(self.p_shape)

@@ -111,10 +111,6 @@ class SEQM_singlepoint_core(torch.nn.Module):
         self.const = Constants()
         self.results = {}
 
-    def __eq__(self, other):
-        if self.__class__ != other.__class__: return False
-        return self.__dict__ == other.__dict__
-
     def full_prediction(self, par, **kwargs):
         return par
 
@@ -258,10 +254,6 @@ class SEQM_multirun_core(torch.nn.Module):
         self.lumo = n_occ.unsqueeze(-1)
         self.results = {}
     
-    def __eq__(self, other):
-        if self.__class__ != other.__class__: return False
-        return self.__dict__ == other.__dict__
-
 #    @staticmethod
     def forward(self, p):
 #    TODO: NEED CUSTOM BACKWARD FOR WHEN CALCULTION FAILS (RETURN NaN).

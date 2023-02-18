@@ -23,10 +23,6 @@ class ParameterKernel(torch.nn.Module):
                 self.X_ref[elm]   = X_elm
                 self.idx_ref[elm] = torch.where(Zall==elm)[0]
     
-    def __eq__(self, other):
-        if self.__class__ != other.__class__: return False
-        return self.__dict__ == other.__dict__
-    
     def get_element_kernel(self, elm, idx, desc, expK=1):
         X_in     = torch.cat([d[idx[i]] for i, d in enumerate(desc)])
         K_base   = torch.matmul(self.X_ref[elm], X_in.T)

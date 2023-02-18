@@ -51,10 +51,6 @@ class SEQM_singlepoint(torch.nn.Module):
         self.settings = seqm_settings
         self.core_runner = SEQM_singlepoint_core(seqm_settings, mode=mode)
     
-    def __eq__(self, other):
-        if self.__class__ != other.__class__: return False
-        return self.__dict__ == other.__dict__
-    
     def forward(self, p, species, coordinates, custom_params=[], mode="full",
                 custom_reference=None):
         self.orderer = Orderator(species, coordinates)
@@ -104,10 +100,6 @@ class SEQM_multirun(torch.nn.Module):
                                         custom_reference=custom_reference,
                                         seqm_settings=seqm_settings)
     
-    def __eq__(self, other):
-        if self.__class__ != other.__class__: return False
-        return self.__dict__ == other.__dict__
-    
     def forward(self, p):
         p_sorted = p[:,self.p_sorting]
         res = self.core_runner(p_sorted)
@@ -135,10 +127,6 @@ class AMASE_singlepoint(torch.nn.Module):
                 reference_coordinates=reference_coordinates,
                 seqm_settings=seqm_settings, custom_params=custom_params,
                 mode=mode, custom_reference=custom_reference)
-    
-    def __eq__(self, other):
-        if self.__class__ != other.__class__: return False
-        return self.__dict__ == other.__dict__
     
     def forward(self, Alpha, Z, positions, desc, reference_params=None, expK=1):
         orderer = Orderator(Z, positions)
@@ -168,10 +156,6 @@ class AMASE_multirun(torch.nn.Module):
                 reference_desc, reference_coordinates=reference_coordinates,
                 seqm_settings=seqm_settings, mode=mode, expK=expK,
                 custom_params=custom_params, custom_reference=custom_reference)
-    
-    def __eq__(self, other):
-        if self.__class__ != other.__class__: return False
-        return self.__dict__ == other.__dict__
     
     def forward(self, Alpha):
         res = self.core_runner(Alpha)

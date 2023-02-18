@@ -136,7 +136,7 @@ class SEQM_singlepoint_core(torch.nn.Module):
                                        reference_par=custom_reference)
         learnedpar = {par:p_in[i] for i, par in enumerate(self.custom_params)}
         self.settings['elements'] = torch.tensor(elements)
-        self.settings['learned'] = custom_params
+        self.settings['learned'] = self.custom_params
         self.settings['eig'] = True
         calc = Energy(self.settings)
 #        try:

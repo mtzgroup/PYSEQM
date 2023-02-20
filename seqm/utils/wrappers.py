@@ -213,7 +213,9 @@ class elementwiseSEQM_trainer(AbstractWrapper):
         Zall = species.reshape(-1)[nondummy]
         real_elements = sorted(set([0]+Zall.tolist()), reverse=True)[:-1]
         elm_map = [real_elements.index(z) for z in Zall]
-        p = torch.stack([p_elm[:,map_i] for map_i in elm_map]).T
+        p = torch.stack([p_elm[:,map_i] for map_i in elm_map]).T.to(device)
+        species = species.to(device)
+        coordinates = coordinates.to(device)
         coordinates.requires_grad_(True)
         res = self.core_runner(p, species, coordinates,
                                custom_params=self.custom_params,
@@ -261,6 +263,9 @@ class SEQM_trainer(AbstractWrapper):
           . custom_reference, torch.Tensor: if in 'delta' mode:
             p = custom_reference + input, default: use standard parameters
         """
+        p = p.to(device)
+        species = species.to(device)
+        coordinates = coordinates.to(device)
         coordinates.requires_grad_(True)
         res = self.core_runner(p, species, coordinates,
                                custom_reference=custom_reference)
@@ -292,7 +297,8 @@ class AMASE_trainer(AbstractWrapper):
                                  seqm_settings=seqm_settings, mode=mode)
 
     def forward(self, A, species, coordinates, desc, expK=1, custom_reference=None):
-#        A = A.to(device)
+        species = species.to(device)
+        coordinates = coordinates.to(device)
         coordinates.requires_grad_(True)
         res = self.core_runner(A, species, coordinates, desc, expK=expK,
                                custom_reference=custom_reference)

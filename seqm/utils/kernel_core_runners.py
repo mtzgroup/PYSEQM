@@ -17,8 +17,6 @@ from .kernels import ParameterKernel
 from .seqm_core_runners import SEQM_singlepoint_core, SEQM_multirun_core
 
 
-device = torch.device("cuda") if torch.cuda.is_available() else torch.device("cpu")
-
 
 class AMASE_singlepoint_core(torch.nn.Module):
     #TODO: Allow for `reference_desc` to be callable

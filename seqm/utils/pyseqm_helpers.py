@@ -12,10 +12,10 @@ from seqm.seqm_functions.parameters import params
 torch.set_default_dtype(torch.float64)
 has_cuda = torch.cuda.is_available()
 if has_cuda:
-    device = torch.device('cuda')
+    device = torch.device("cuda")
     sp2_def = [True, 1e-5]
 else:
-    device = torch.device('cpu')
+    device = torch.device("cpu")
     sp2_def = [False]
 
 
@@ -252,7 +252,7 @@ def get_energy_calculator(species, coordinates, custom_parameters=(), **kwargs):
     seqm_settings['learned'] = custom_parameters
     seqm_settings['eig'] = True
     seqm_settings.update(kwargs)
-    calc = Energy(seqm_settings).to(device)
+    calc = Energy(seqm_settings)
     return calc
     
 

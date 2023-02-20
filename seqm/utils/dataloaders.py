@@ -6,6 +6,7 @@
 # TODO: . typing                                                            #
 #############################################################################
 
+import torch
 from abc import ABC, abstractmethod
 from torch.utils.data import Dataset, DataLoader
 from torch.nn.utils.rnn import pad_sequence
@@ -20,14 +21,14 @@ class AbstractLoader(ABC, Dataset):
         self.species = pad_sequence(species, batch_first=True)
         self.nMols = self.species.shape[0]
         self.coordinates = pad_sequence(coordinates, batch_first=True)
-        self.Eat_ref = atomization_ref
-        self.Etot_ref = energy_ref
+        self.Eat_ref = torch.tensor(atomization_ref)
+        self.Etot_ref = torch.tensor(energy_ref)
         self.F_ref = pad_sequence(forces_ref, batch_first=True)
-        self.gap_ref = gap_ref
-        self.Eat_weight = atomization_weight
-        self.Etot_weight = energy_weight
-        self.F_weight = forces_weight
-        self.gap_weight = gap_weight
+        self.gap_ref = torch.tensor(gap_ref)
+        self.Eat_weight = torch.tensor(atomization_weight)
+        self.Etot_weight = torch.tensor(energy_weight)
+        self.F_weight = torch.tensor(forces_weight)
+        self.gap_weight = torch.tensor(gap_weight)
 
     def __len__(self): return self.nMols
 

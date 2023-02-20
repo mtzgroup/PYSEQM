@@ -108,7 +108,7 @@ class SEQM_singlepoint_core(torch.nn.Module):
                 self.process_prediction = self.custom_delta
         else:
             raise ValueError("Unknown mode '"+mode+"'.")
-        self.const = Constants()
+        self.const = Constants().to(device)
         self.results = {}
 
     def full_prediction(self, par, **kwargs):
@@ -138,7 +138,7 @@ class SEQM_singlepoint_core(torch.nn.Module):
         self.settings['elements'] = torch.tensor(elements)
         self.settings['learned'] = self.custom_params
         self.settings['eig'] = True
-        calc = Energy(self.settings)
+        calc = Energy(self.settings).to(device)
 #        try:
         res = calc(self.const, coordinates, species, learnedpar, 
                        all_terms=True)

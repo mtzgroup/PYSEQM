@@ -8,9 +8,6 @@ class ParameterKernel(torch.nn.Module):
         if not torch.is_tensor(Z_ref):
             msg  = "Atomic numbers have to be provided as tensors!"
             raise ValueError(msg)
-        if not isinstance(desc_ref, list) and torch.is_tensor(desc_ref[0]):
-            msg = "Descriptors have to be provided as list of tensors!"
-            raise ValueError(msg)
         with torch.no_grad():
             nondummy = (Z_ref > 0).reshape(-1)
             Zall = Z_ref.reshape(-1)[nondummy]
@@ -51,9 +48,9 @@ class ParameterKernel(torch.nn.Module):
         if any(elm not in self.elements_ref for elm in elements):
             raise ValueError("Elements in reference and call inconsistent!")
         K = self.get_kernel_dict(Z, desc, expK=expK)
-        y = torch.zeros((Alpha.shape[0], Zall.numel()))
+        y = torch.zeros((Alpha.shape[0], Zall.numel())).to(Alpha.device)
         Alpha_K = list(map(lambda elm :
-                           torch.matmul(Alpha[:,self.idx_ref[elm]], K[elm]),
+                           torch.matmul(Alpha[:,self.idx_ref[elm]], K[elm].to(Alpha.device)),
                            elements))
         elm_idx = [torch.where(Zall==elm)[0] for elm in elements]
         for i, idx in enumerate(elm_idx): y[:,idx] = Alpha_K[i]

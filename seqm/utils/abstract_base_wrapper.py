@@ -17,6 +17,8 @@ from .pyseqm_helpers import prepare_array, Orderator
 from .loss_functions import *
 
 torch.set_default_dtype(torch.float64)
+device = torch.device("cuda") if torch.has_cuda else torch.device("cpu")
+
 # THIS NEEDS TO BE CONSISTENT WITH DATALOADERS!
 prop2index = {'atomization':0, 'energy':1, 'forces':2, 'gap':3}
 
@@ -64,7 +66,7 @@ class AbstractWrapper(ABC, torch.nn.Module):
         pass
         
     
-    def train(self, x, dataloader, n_epochs=4, include=[], optimizer="Adam",
+    def train(self, x_in, dataloader, n_epochs=4, include=[], optimizer="Adam",
               opt_kwargs={}, n_up_thresh=5, up_thresh=1e-4, loss_conv=1e-8,
               loss_step_conv=1e-8, scheduler=None, scheduler_kwargs={},
               validation_loader=None):
@@ -73,7 +75,7 @@ class AbstractWrapper(ABC, torch.nn.Module):
         
         Parameters:
         -----------
-          . x, torch.Tensor: initial guess of parameters entering self.forward
+          . x_in, torch.Tensor: initial guess of parameters entering self.forward
           . dataloader, torch.utils.data.Dataloader: dataloader for training
                 (see seqm.utils.dataloaders)
           . n_epochs, int: number of epochs in optimization
@@ -116,6 +118,7 @@ class AbstractWrapper(ABC, torch.nn.Module):
             msg  = "Unknown optimizer '"+optimizer+"'. Currently, only "
             msg += "optimizers from torch.optim are supported."
             raise ImportError(msg)
+        x = x_in.to(device)
         self.opt = my_opt([x], **opt_kwargs)
         lr_sched = self.add_scheduler(scheduler, self.opt, scheduler_kwargs)
         if any(prop not in self.implemented_properties for prop in include):
@@ -178,6 +181,9 @@ class AbstractWrapper(ABC, torch.nn.Module):
     def train_epoch(self, x, dataloader):
         Ltot, ntot = 0., 0.
         for (inputs, refs, weights) in dataloader:
+            inputs = [inp.to(device) for inp in inputs]
+            refs = [ref.to(device) for ref in refs]
+            weights = [w.to(device) for w in weights]
             ntot += inputs[0].shape[0]
             nAtoms = torch.count_nonzero(inputs[0], dim=1)
             def closure():
@@ -196,6 +202,9 @@ class AbstractWrapper(ABC, torch.nn.Module):
     def validate_epoch(self, x, validation_loader):
         Lval, nval = 0., 0.
         for (inputs, refs, weights) in validation_loader:
+            inputs = [inp.to(device) for inp in inputs]
+            refs = [ref.to(device) for ref in refs]
+            weights = [w.to(device) for w in weights]
             nval += inputs[0].shape[0]
             nAtoms = torch.count_nonzero(inputs[0], dim=1)
             res = self(x, *inputs)
@@ -209,6 +218,9 @@ class AbstractWrapper(ABC, torch.nn.Module):
     def get_loss(self, x, dataloader):
         Ltot, ntot = 0., 0.
         for (inputs, refs, weights) in dataloader:
+            inputs = [inp.to(device) for inp in inputs]
+            refs = [ref.to(device) for ref in refs]
+            weights = [w.to(device) for w in weights]
             ntot += inputs[0].shape[0]
             nAtoms = torch.count_nonzero(inputs[0], dim=1)
             res = self(x, *inputs)

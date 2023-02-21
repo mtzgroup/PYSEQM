@@ -27,7 +27,8 @@ class AMASE_singlepoint_core(torch.nn.Module):
         super(AMASE_singlepoint_core, self).__init__()
         self.n_ref = torch.count_nonzero(reference_Z)
         if callable(reference_desc): raise NotImplementedError
-        self.kernel = ParameterKernel(reference_Z, reference_desc)
+        with torch.no_grad():
+            self.kernel = ParameterKernel(reference_Z, reference_desc)
         self.seqm_runner = SEQM_singlepoint_core(seqm_settings, mode=mode,
                                 custom_params=custom_params,
                                 use_custom_reference=use_custom_reference)

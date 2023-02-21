@@ -42,12 +42,13 @@ class ParameterKernel(torch.nn.Module):
         return K
     
     def forward(self, Alpha, Z, desc, expK=1):
-        nondummy = (Z > 0).reshape(-1)
-        Zall = Z.reshape(-1)[nondummy]
-        elements = sorted(set(Zall.tolist()))
-        if any(elm not in self.elements_ref for elm in elements):
-            raise ValueError("Elements in reference and call inconsistent!")
-        K = self.get_kernel_dict(Z, desc, expK=expK)
+        with torch.no_grad():
+            nondummy = (Z > 0).reshape(-1)
+            Zall = Z.reshape(-1)[nondummy]
+            elements = sorted(set(Zall.tolist()))
+            if any(elm not in self.elements_ref for elm in elements):
+                raise ValueError("Elements in reference and call inconsistent!")
+            K = self.get_kernel_dict(Z, desc, expK=expK)
         y = torch.zeros((Alpha.shape[0], Zall.numel())).to(Alpha.device)
         Alpha_K = list(map(lambda elm :
                            torch.matmul(Alpha[:,self.idx_ref[elm]], K[elm].to(Alpha.device)),

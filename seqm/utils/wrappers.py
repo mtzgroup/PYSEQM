@@ -297,8 +297,8 @@ class AMASE_trainer(AbstractWrapper):
                                  seqm_settings=seqm_settings, mode=mode)
 
     def forward(self, A, species, coordinates, desc, expK=1, custom_reference=None):
-        species = species.to(device)
-        coordinates = coordinates.to(device)
+#        species = species.to(device)
+#        coordinates = coordinates.to(device)
         coordinates.requires_grad_(True)
         res = self.core_runner(A, species, coordinates, desc, expK=expK,
                                custom_reference=custom_reference)

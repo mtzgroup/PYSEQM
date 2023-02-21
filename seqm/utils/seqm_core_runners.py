@@ -86,30 +86,31 @@ class SEQM_singlepoint_core(torch.nn.Module):
     def __init__(self, seqm_settings={}, mode="full", custom_params=[],
                  use_custom_reference=False):
         super(SEQM_singlepoint_core, self).__init__()
-        self.settings = default_settings
-        self.settings.update(seqm_settings)
-        self.param_dir = seqm_settings.get("parameter_file_dir", "nodirdefined")
-        self.custom_params = custom_params
-        self.method = seqm_settings.get("method", "nomethoddefined")
-        if self.method == "nomethoddefined":
-            raise ValueError("`seqm_settings` has to include 'method'")
-        # set preprocessing of input -> SEQC parameters depending on `mode`
-        param_dir = seqm_settings.get("parameter_file_dir", "nodirdefined")
-        if mode == "full":
-            self.process_prediction = self.full_prediction
-        elif mode == "delta":
-            if use_custom_reference is False:
-                if param_dir == "nodirdefined":
-                    msg  = "In 'delta' mode, `seqm_settings` has to include "
-                    msg += "'parameter_file_dir'"
-                    raise ValueError(msg)
-                self.process_prediction = self.default_delta
+        with torch.no_grad():
+            self.settings = default_settings
+            self.settings.update(seqm_settings)
+            self.param_dir = seqm_settings.get("parameter_file_dir", "nodirdefined")
+            self.custom_params = custom_params
+            self.method = seqm_settings.get("method", "nomethoddefined")
+            if self.method == "nomethoddefined":
+                raise ValueError("`seqm_settings` has to include 'method'")
+            # set preprocessing of input -> SEQC parameters depending on `mode`
+            param_dir = seqm_settings.get("parameter_file_dir", "nodirdefined")
+            if mode == "full":
+                self.process_prediction = self.full_prediction
+            elif mode == "delta":
+                if use_custom_reference is False:
+                    if param_dir == "nodirdefined":
+                        msg  = "In 'delta' mode, `seqm_settings` has to include "
+                        msg += "'parameter_file_dir'"
+                        raise ValueError(msg)
+                    self.process_prediction = self.default_delta
+                else:
+                    self.process_prediction = self.custom_delta
             else:
-                self.process_prediction = self.custom_delta
-        else:
-            raise ValueError("Unknown mode '"+mode+"'.")
-        self.const = Constants().to(device)
-        self.results = {}
+                raise ValueError("Unknown mode '"+mode+"'.")
+            self.const = Constants().to(device)
+            self.results = {}
 
     def full_prediction(self, par, **kwargs):
         return par

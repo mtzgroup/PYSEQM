@@ -1,15 +1,15 @@
 #############################################################################
 # Wrappers for SEQC calculations                                            #
 #                                                                           #
-# Current (Feb/12)                                                          #
-# TODO: . REFACTOR AMASE_trainer                                            #
-#       . MOVE WRAPPERS TO AbstractWrapper DERIVATIVES (cf. AMASE_trainer)  #
+# Current (Feb/20)                                                          #
+# TODO: . clean up module, remove unnecessary wrappers                      #
 #       . typing                                                            #
-#       . double-check GPU support!                                         #
+#       . improvement of GPU performance? (seems to be in PYSEQM internals) #
 #############################################################################
 
 import torch
 from torch.autograd import grad as agrad
+from torch.nn.utils.rnn import pad_sequence
 from itertools import chain
 from seqm.basics import Energy, Parser
 from seqm.seqm_functions.constants import Constants
@@ -19,8 +19,6 @@ from .kernels import ParameterKernel
 from .seqm_core_runners import SEQM_singlepoint_core, SEQM_multirun_core
 from .kernel_core_runners import AMASE_singlepoint_core, AMASE_multirun_core
 
-
-LFAIL = torch.tensor(torch.inf, requires_grad=True)
 
 torch.set_default_dtype(torch.float64)
 has_cuda = torch.cuda.is_available()
@@ -218,7 +216,6 @@ class elementwiseSEQM_trainer(AbstractWrapper):
         coordinates = coordinates.to(device)
         coordinates.requires_grad_(True)
         res = self.core_runner(p, species, coordinates,
-                               custom_params=self.custom_params,
                                custom_reference=custom_reference)
         self.results = self.core_runner.results
         return res
@@ -263,9 +260,8 @@ class SEQM_trainer(AbstractWrapper):
           . custom_reference, torch.Tensor: if in 'delta' mode:
             p = custom_reference + input, default: use standard parameters
         """
-        p = p.to(device)
-        species = species.to(device)
-        coordinates = coordinates.to(device)
+#        species = species.to(device)
+#        coordinates = coordinates.to(device)
         coordinates.requires_grad_(True)
         res = self.core_runner(p, species, coordinates,
                                custom_reference=custom_reference)
@@ -290,6 +286,14 @@ class AMASE_trainer(AbstractWrapper):
         super(AMASE_trainer, self).__init__(custom_params=custom_params,
                                 loss_type=loss_type, loss_args=loss_args,
                                 loss_kwargs=loss_kwargs)
+        if isinstance(reference_Z, list):
+            with torch.no_grad():
+                reference_Z = pad_sequence(reference_Z, batch_first=True)
+        if isinstance(reference_desc, list):
+            with torch.no_grad():
+                reference_desc = pad_sequence(reference_desc, batch_first=True)
+        reference_Z = reference_Z.to(device)
+        reference_desc = reference_desc.to(device)
         self.core_runner = AMASE_singlepoint_core(reference_Z, reference_desc,
                                  reference_coordinates=reference_coordinates,
                                  custom_params=custom_params,

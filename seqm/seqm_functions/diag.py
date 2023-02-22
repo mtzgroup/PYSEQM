@@ -106,15 +106,16 @@ def construct_P(e, v, nocc):
 
 
 
+#@torch.compile ## test pytorch2.0's compile functionality for speed-up
 def sym_eig_trunc(x,nheavyatom,nH,nocc, eig_only=False):
 
-    ##NOTE UPLO='U' doesn't seem to matter in torch.linalg.eigh!!!
+    ##NOTE UPLO='U' actually doesn't seem to matter in torch.linalg.eigh
     sym_eigh = degen_symeig.apply if DEGEN_EIGENSOLVER else torch.linalg.eigh
 
     dtype =  x.dtype
     device = x.device
     if x.dim()==2:
-        e0, v = sym_eigh(pack(x, nheavyatom, nH))
+        e0, v = sym_eigh(pack(x, nheavyatom, nH), UPLO='U')
 #        e0, v = torch.linalg.eigh(pack(x, nheavyatom, nH), UPLO='U')
 #        e0,v = torch.symeig(pack(x, nheavyatom, nH),eigenvectors=True,upper=True)
         e = torch.zeros((x.shape[0]),dtype=dtype,device=device)
@@ -182,15 +183,16 @@ def sym_eig_trunc(x,nheavyatom,nH,nocc, eig_only=False):
     return e, P, v
 
 
+#@torch.compile ## test pytorch2.0's compile functionality for speed-up
 def sym_eig_trunc1(x,nheavyatom,nH,nocc, eig_only=False):
     
-    ##NOTE UPLO='U' doesn't seem to matter in torch.linalg.eigh!!!
+    ##NOTE UPLO='U' actually doesn't seem to matter in torch.linalg.eigh
     sym_eigh = degen_symeig.apply if DEGEN_EIGENSOLVER else torch.linalg.eigh
     
     dtype =  x.dtype
     device = x.device
     if x.dim()==2:
-        e0, v = sym_eigh(pack(x, nheavyatom, nH))
+        e0, v = sym_eigh(pack(x, nheavyatom, nH), UPLO='U')
 #        e0, v = torch.linalg.eigh(pack(x, nheavyatom, nH), UPLO='U')
 #        e0,v = torch.symeig(pack(x, nheavyatom, nH),eigenvectors=True,upper=True)
         e = torch.zeros((x.shape[0]),dtype=dtype,device=device)
@@ -230,10 +232,11 @@ def sym_eig_trunc1(x,nheavyatom,nH,nocc, eig_only=False):
 
 
 ## adapted from M.F. Kasim, arXiv:2011.04366 (2020)
-##           and https://github.com/xitorch/xitorch
+##      and consistent with https://github.com/xitorch/xitorch
+#@torch.compile ## test pytorch2.0's compile functionality for speed-up
 class degen_symeig(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, A):
+    def forward(ctx, A, UPLO='U'):
         eival, eivec = torch.linalg.eigh(A)
         ctx.save_for_backward(eival, eivec)
         return eival, eivec

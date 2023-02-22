@@ -5,7 +5,6 @@
 #                                                                          #
 # Current (Feb/09)                                                         #
 # TODO:  . typing                                                          #
-#        . double-check GPU support!                                       #
 #        . enable select-atoms/elements-only mode                          #
 ############################################################################
 

@@ -1,13 +1,13 @@
-############################################################################
-# Utilities for simplifying running SEQM calculations                      #
-#  - SEQM_singlepoint: parameters, species, coordinates defined at runtime #
-#  - SEQM_multirun: parameters at runtime, systems fixed (for training)    #
-#                                                                          #
-# Curent (Feb/06): Basic implementation                                    #
-# TODO:  . typing                                                          #
-#        . ?add MD/geometry optimization engine?                           #
-#        . custom backwards for (unlikely) RuntimeErrors in foward         #
-############################################################################
+#############################################################################
+# Utilities for simplifying running SEQM calculations                       #
+#  - SEQM_singlepoint: parameters, species, coordinates defined at runtime  #
+#  - SEQM_multirun: parameters at runtime, systems fixed (offline train)    #
+#                                                                           #
+# Current (Feb/21):                                                         #
+# TODO: . typing                                                            #
+#       . custom backwards for (unlikely) RuntimeErrors in foward           #
+#       . improvement of GPU performance? (seems to be in PYSEQM internals) #
+#############################################################################
 
 import torch
 from torch.autograd import grad as agrad
@@ -16,7 +16,7 @@ from seqm.seqm_functions.constants import Constants
 from .pyseqm_helpers import get_default_parameters
 
 
-LFAIL = torch.tensor(torch.inf)
+LFAIL = torch.tensor([1e6])
 
 torch.set_default_dtype(torch.float64)
 has_cuda = torch.cuda.is_available()
@@ -63,8 +63,6 @@ class SEQM_singlepoint_core(torch.nn.Module):
       . p, torch.Tensor: SEQC parameters (or Delta parameters in 'delta' mode)
       . species, torch.Tensor: atomic numbers (sorted in descending order)
       . coordinates, torch.Tensor: atomic positions (ordered accordingly)
-      . custom_params, list of str: names of custom parameters in p
-            default: [] (i.e., all standard parameters)
       . custom_reference, torch.Tensor: In 'delta' mode, SEQC parameters are
             given by `p` + `custom_reference`, default: None. If in 'delta' 
             mode and `custom_reference` is None: use standard parameters of
@@ -128,8 +126,8 @@ class SEQM_singlepoint_core(torch.nn.Module):
     
 #    @staticmethod
     def forward(self, p, species, coordinates, custom_reference=None):
-#    TODO: NEED CUSTOM BACKWARD FOR WHEN CALCULTION FAILS (RETURN NaN).
-#          IS p.register_hook(lambda grad: grad * NaN) working?
+#    TODO: CUSTOM BACKWARD FOR WHEN CALCULTION FAILS?
+#          IS p.register_hook(lambda grad: ...) working?
 #    def forward(self, ctx, p):
         """ Run calculation. """
         elements = sorted(set([0] + species.reshape(-1).tolist()))
@@ -144,7 +142,7 @@ class SEQM_singlepoint_core(torch.nn.Module):
         res = calc(self.const, coordinates, species, learnedpar, 
                        all_terms=True)
 #        except RuntimeError:
-#            p.register_hook(lambda grad: grad * torch.nan)
+#            p.register_hook(lambda grad: grad * LFAIL)
 #            coordinates.register_hook(lambda grad: grad * LFAIL)
 #            return LFAIL, LFAIL, LFAIL*torch.ones_like(xyz), LFAIL
         masking = torch.where(res[-1], LFAIL, 1.)

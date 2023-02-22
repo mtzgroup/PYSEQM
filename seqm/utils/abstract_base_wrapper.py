@@ -3,9 +3,9 @@
 #  - NoScheduler: dummy scheduler (simple pass)                             #
 #  - AbstractWrapper: abstract base class as template for wrapper modules   #
 #                                                                           #
-# Current (Feb/12)                                                          #
+# Current (Feb/20)                                                          #
 # TODO: . typing                                                            #
-#       . double-check GPU support!                                         #
+#       . Improvement of GPU performance?                                   #
 #       . enable optimization of only select atoms/elements (mask grad)     #
 #############################################################################
 
@@ -66,7 +66,7 @@ class AbstractWrapper(ABC, torch.nn.Module):
         pass
         
     
-    def train(self, x_in, dataloader, n_epochs=4, include=[], optimizer="Adam",
+    def train(self, x, dataloader, n_epochs=4, include=[], optimizer="Adam",
               opt_kwargs={}, n_up_thresh=5, up_thresh=1e-4, loss_conv=1e-8,
               loss_step_conv=1e-8, scheduler=None, scheduler_kwargs={},
               validation_loader=None):
@@ -75,7 +75,7 @@ class AbstractWrapper(ABC, torch.nn.Module):
         
         Parameters:
         -----------
-          . x_in, torch.Tensor: initial guess of parameters entering self.forward
+          . x, torch.Tensor: initial guess of parameters entering self.forward
           . dataloader, torch.utils.data.Dataloader: dataloader for training
                 (see seqm.utils.dataloaders)
           . n_epochs, int: number of epochs in optimization
@@ -118,7 +118,6 @@ class AbstractWrapper(ABC, torch.nn.Module):
             msg  = "Unknown optimizer '"+optimizer+"'. Currently, only "
             msg += "optimizers from torch.optim are supported."
             raise ImportError(msg)
-        x = x_in.to(device)
         self.opt = my_opt([x], **opt_kwargs)
         lr_sched = self.add_scheduler(scheduler, self.opt, scheduler_kwargs)
         if any(prop not in self.implemented_properties for prop in include):

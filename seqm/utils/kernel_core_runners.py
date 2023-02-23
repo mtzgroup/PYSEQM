@@ -36,10 +36,10 @@ class AMASE_singlepoint_core(torch.nn.Module):
     
     def forward(self, Alpha, Z, positions, desc, custom_reference=None, expK=1):
         pred = self.kernel(Alpha, Z, desc, expK=expK)
-        res = self.seqm_runner(pred, Z, positions, 
+        res, failed = self.seqm_runner(pred, Z, positions, 
                                custom_reference=custom_reference)
         self.results = self.seqm_runner.results
-        return res
+        return res, failed
     
     def get_property(self, property_name):
         if not property_name in self.results:
@@ -95,9 +95,9 @@ class AMASE_multirun_core(torch.nn.Module):
         Alpha_K = list(map(lambda i, K : torch.matmul(Alpha[:,i], K), 
                            self.ref_idx, self.K))
         for i, idx in enumerate(self.elm_idx): pred[:,idx] = Alpha_K[i]
-        res = self.seqm_runner(pred)
+        res, failed = self.seqm_runner(pred)
         self.results = self.seqm_runner.results
-        return res
+        return res, failed
     
     def get_property(self, property_name):
         if not property_name in self.results:

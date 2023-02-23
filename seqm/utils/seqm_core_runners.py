@@ -140,7 +140,7 @@ class SEQM_singlepoint_core(torch.nn.Module):
         calc = Energy(self.settings).to(device)
 #        try:
         res = calc(self.const, coordinates, species, learnedpar, 
-                       all_terms=True)
+                   all_terms=True)
 #        except RuntimeError:
 #            p.register_hook(lambda grad: grad * LFAIL)
 #            coordinates.register_hook(lambda grad: grad * LFAIL)
@@ -165,7 +165,7 @@ class SEQM_singlepoint_core(torch.nn.Module):
         self.results['energy'] = Etot_fin
         self.results['forces'] = F_fin
         self.results['gap'] = gap_fin
-        return Eat_fin, Etot_fin, F_fin, gap_fin
+        return [Eat_fin, Etot_fin, F_fin, gap_fin], res[-1]
     
     def get_property(self, property_name):
         if not property_name in self.results:
@@ -282,7 +282,7 @@ class SEQM_multirun_core(torch.nn.Module):
         self.results['energy'] = Etot_fin
         self.results['forces'] = F_fin
         self.results['gap'] = gap_fin
-        return Eat_fin, Etot_fin, F_fin, gap_fin
+        return [Eat_fin, Etot_fin, F_fin, gap_fin], res[-1]
         
     def get_property(self, property_name):
         if not property_name in self.results:

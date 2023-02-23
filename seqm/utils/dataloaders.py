@@ -36,6 +36,12 @@ class AbstractLoader(ABC, Dataset):
     def __getitem__(self, idx): pass
 
     def dataloader(self, **kwargs):
+        per_batch = kwargs.get("batch_size", 1)
+        no_last = kwargs.get("drop_last", False)
+        if (per_batch > self.nMols) and no_last:
+            msg  = "Batch size larger than dataset. With `drop_last=True` "
+            msg += "dataloader will return no items!"
+            raise ValueError(msg)
         return DataLoader(self, **kwargs)
 
 

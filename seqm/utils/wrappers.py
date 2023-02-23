@@ -63,14 +63,15 @@ class SEQM_singlepoint(torch.nn.Module):
         ragged_idx = [(s+shifts[i]).tolist() for i, s in enumerate(subsort)]
         p_sorting = torch.tensor(list(chain(*ragged_idx)))
         p_sorted = p[:,p_sorting]
-        res = self.core_runner(p_sorted, Z, xyz, custom_params=custom_params,
-                               custom_reference=custom_reference)
+        res, failed = self.core_runner(p_sorted, Z, xyz,
+                                custom_params=custom_params,
+                                custom_reference=custom_reference)
         #TODO: DOUBLE-CHECK IF THIS IS NEEDED!
 #        F_resort = self.orderer.reorder(F)
 #        res[2] = F_resort
         self.results = self.core_runner.results
 #        self.results['forces'] = F_resort
-        return res
+        return res, failed
     
     def get_property(self, property_name):
         if not property_name in self.results:
@@ -100,13 +101,13 @@ class SEQM_multirun(torch.nn.Module):
     
     def forward(self, p):
         p_sorted = p[:,self.p_sorting]
-        res = self.core_runner(p_sorted)
+        res, failed = self.core_runner(p_sorted)
         #TODO: DOUBLE-CHECK IF THIS IS NEEDED!
 #        F_resort = self.orderer.reorder(F)
 #        res[2] = F_resort
         self.results = self.core_runner.results
 #        self.results['forces'] = F_resort
-        return res
+        return res, failed
     
     def get_property(self, property_name):
         if not property_name in self.results:
@@ -130,10 +131,10 @@ class AMASE_singlepoint(torch.nn.Module):
         orderer = Orderator(Z, positions)
         species, xyz = orderer.prepare_input()
         xyz.requires_grad_(True)
-        res = self.core_runner(Alpha, species, xyz, desc, expK=expK,
+        res, failed = self.core_runner(Alpha, species, xyz, desc, expK=expK,
                                reference_params=reference_params)
         self.results = self.core_runner.results
-        return res
+        return res, failed
     
     def get_property(self, property_name):
         if not property_name in self.results:
@@ -156,9 +157,9 @@ class AMASE_multirun(torch.nn.Module):
                 custom_params=custom_params, custom_reference=custom_reference)
     
     def forward(self, Alpha):
-        res = self.core_runner(Alpha)
+        res, failed = self.core_runner(Alpha)
         self.results = self.core_runner.results
-        return res
+        return res, failed
     
     def get_property(self, property_name):
         if not property_name in self.results:
@@ -215,10 +216,10 @@ class elementwiseSEQM_trainer(AbstractWrapper):
         species = species.to(device)
         coordinates = coordinates.to(device)
         coordinates.requires_grad_(True)
-        res = self.core_runner(p, species, coordinates,
+        res, failed = self.core_runner(p, species, coordinates,
                                custom_reference=custom_reference)
         self.results = self.core_runner.results
-        return res
+        return res, failed
         
     def get_property(self, property_name):
         if not property_name in self.results:
@@ -263,10 +264,10 @@ class SEQM_trainer(AbstractWrapper):
 #        species = species.to(device)
 #        coordinates = coordinates.to(device)
         coordinates.requires_grad_(True)
-        res = self.core_runner(p, species, coordinates,
+        res, failed = self.core_runner(p, species, coordinates,
                                custom_reference=custom_reference)
         self.results = self.core_runner.results
-        return res
+        return res, failed
         
     def get_property(self, property_name):
         if not property_name in self.results:
@@ -304,10 +305,10 @@ class AMASE_trainer(AbstractWrapper):
 #        species = species.to(device)
 #        coordinates = coordinates.to(device)
         coordinates.requires_grad_(True)
-        res = self.core_runner(A, species, coordinates, desc, expK=expK,
+        res, failed = self.core_runner(A, species, coordinates, desc, expK=expK,
                                custom_reference=custom_reference)
         self.results = self.core_runner.results
-        return res
+        return res, failed
 
     def get_property(self, property_name):
         if not property_name in self.results:

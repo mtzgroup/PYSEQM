@@ -69,7 +69,7 @@ class AbstractWrapper(ABC, torch.nn.Module):
     def train(self, x, dataloader, n_epochs=4, include=[], optimizer="Adam",
               opt_kwargs={}, n_up_thresh=5, up_thresh=1e-4, loss_conv=1e-8,
               loss_step_conv=1e-8, scheduler=None, scheduler_kwargs={},
-              validation_loader=None, SCFfail_penalty=(1e3,1e-3,1e-5)):
+              validation_loader=None, SCFfail_penalty=(1e1,1e-3,1e-5)):
         """
         Generic routine for minimizing loss.
         

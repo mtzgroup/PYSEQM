@@ -16,6 +16,10 @@ This is a locally-modified development version of [PYSEQM](https://github.com/la
 * THIS VERSION: easy-to-use interface for parameter optimization (alpha)
 * THIS VERSION: kernel-predicted SEQC parameters incl. training routines (alpha)
 
+* **TODO**:
+  - Loss of training routines shows constant scaling with batch size during batched training (but correct minimum)
+  - GPU support for training functioning, but non-beneficial for kernel learning (likely due to small model size)
+  - enable parallel training (DistributedDataParallel module)
 
 ## Installation:
 

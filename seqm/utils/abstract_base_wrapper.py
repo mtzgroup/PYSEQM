@@ -63,9 +63,9 @@ class AbstractWrapper(ABC, torch.nn.Module):
         
     
     def train(self, x, dataloader, n_epochs=4, include=[], optimizer="Adam",
-              opt_kwargs={}, n_up_thresh=5, up_thresh=1e-4, loss_conv=1e-8,
-              loss_step_conv=1e-8, scheduler=None, scheduler_kwargs={},
-              validation_loader=None, SCFfail_penalty=(1e2,1e-3,1e-5)):
+              opt_kwargs={}, opt_mode="stochastic", n_up_thresh=5, up_thresh=1e-4,
+              loss_conv=1e-8, loss_step_conv=1e-8, scheduler=None, scheduler_kwargs={},
+              validation_loader=None, SCFfail_penalty=[1e2,1e-3,1e-5]):
         """
         Generic routine for minimizing loss.
         
@@ -84,6 +84,10 @@ class AbstractWrapper(ABC, torch.nn.Module):
                     - Adam, single-epoch LBFGS appear to work OK
                     - Adagrad, Rprop seem stable, but veeeery slow
           . opt_kwargs, dict: dictionary of kwargs for optimizer, default: {}
+          . opt_mode, str: mode for taking optimization steps
+                'stochastic': take step in every batch (stochastic training)
+                'full': accumulate loss of all batches, then take step
+                default: 'stochastic'
           . n_up_thresh, int: number of consecutive increasing loss to 
                 accept during minimization, default: 5
           . up_thresh, float: criterion to decide whether loss increased
@@ -118,9 +122,15 @@ class AbstractWrapper(ABC, torch.nn.Module):
             raise ImportError(msg)
         self.opt = my_opt([x], **opt_kwargs)
         lr_sched = self.add_scheduler(scheduler, self.opt, scheduler_kwargs)
+        if opt_mode == "stochastic":
+            self.train_epoch = self.train_stochastic
+        elif opt_mode == "full":
+            self.train_epoch = self.train_full
+        else:
+            raise ValueError("Unknown optimization mode '"+opt_mode+"'")
         self.SCFfail_penalty = SCFfail_penalty
         if any(prop not in self.implemented_properties for prop in include):
-            raise ValueError("Requested properties not available.")
+            raise ValueError("Requested property/ies not available.")
         self.include_loss = sorted([prop2index[prop] for prop in include])
         Lbak, n_up, self.minimize_log = torch.inf, 0, []
         logmsg  = "\n  SEQC OPTIMIZATION BROUGHT TO YOU BY SLOWCODE, INC."
@@ -176,7 +186,7 @@ class AbstractWrapper(ABC, torch.nn.Module):
         return x, L_end
         
     
-    def train_epoch(self, x, dataloader):
+    def train_stochastic(self, x, dataloader):
         Ltot, ntot = 0., 0.
         for (inputs, refs, weights) in dataloader:
             inputs = [inp.to(device) for inp in inputs]
@@ -189,6 +199,7 @@ class AbstractWrapper(ABC, torch.nn.Module):
                 self.opt.zero_grad()
                 res, fail = self(x, *inputs)
                 if fail.any():
+                    ntot -= fail.count_nonzero()
                     with torch.no_grad():
                         penalty = fail.count_nonzero()*self.SCFfail_penalty[0]
                         penalty_width = self.SCFfail_penalty[1]
@@ -205,6 +216,41 @@ class AbstractWrapper(ABC, torch.nn.Module):
             L = self.opt.step(closure)
             Ltot += L.item()
         return Ltot / ntot
+        
+    
+    def train_full(self, x, dataloader):
+        Lbatches = torch.zeros(len(dataloader))
+        def closure():
+            ntot = 0.
+            self.opt.zero_grad()
+            for ib, (inputs, refs, weights) in enumerate(dataloader):
+                inputs = [inp.to(device) for inp in inputs]
+                refs = [ref.to(device) for ref in refs]
+                weights = [w.to(device) for w in weights]
+                ntot += inputs[0].shape[0]
+                nAtoms = torch.count_nonzero(inputs[0], dim=1)
+                last_step = x.detach().clone() - self.last_x
+                res, fail = self(x, *inputs)
+                if fail.any():
+                    ntot -= fail.count_nonzero()
+                    with torch.no_grad():
+                        penalty = fail.count_nonzero()*self.SCFfail_penalty[0]
+                        penalty_width = self.SCFfail_penalty[1]
+                        offset = last_step * self.SCFfail_penalty[2]
+                        center = x.detach().clone() + offset
+                        self.loss_func.add_penalty(center,sigma=penalty_width,
+                                                   scale=penalty)
+                loss = self.loss_func(res, refs, x, nAtoms=nAtoms,
+                            weights=weights, include=self.include_loss,
+                            extensive=self.is_extensive, masking=fail)
+                Lbatches[ib] = loss
+            Ltot = Lbatches.sum() / ntot
+            Ltot.backward()
+            return Ltot
+        self.last_x = x.detach().clone()
+        L = self.opt.step(closure)
+        Lout = L.item()
+        return Lout
         
     
     def validate_epoch(self, x, validation_loader):

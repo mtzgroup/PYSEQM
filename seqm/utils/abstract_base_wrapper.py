@@ -53,10 +53,6 @@ class AbstractWrapper(ABC, torch.nn.Module):
         self.custom_params = custom_params
         
     
-    def __eq__(self, other):
-        if self.__class__ != other.__class__: return False
-        return self.__dict__ == other.__dict__
-        
     @abstractmethod
     def forward(self, x, species, coordinates):
         """
@@ -69,7 +65,7 @@ class AbstractWrapper(ABC, torch.nn.Module):
     def train(self, x, dataloader, n_epochs=4, include=[], optimizer="Adam",
               opt_kwargs={}, n_up_thresh=5, up_thresh=1e-4, loss_conv=1e-8,
               loss_step_conv=1e-8, scheduler=None, scheduler_kwargs={},
-              validation_loader=None, SCFfail_penalty=(1e1,1e-3,1e-5)):
+              validation_loader=None, SCFfail_penalty=(1e2,1e-3,1e-5)):
         """
         Generic routine for minimizing loss.
         
@@ -126,7 +122,6 @@ class AbstractWrapper(ABC, torch.nn.Module):
         if any(prop not in self.implemented_properties for prop in include):
             raise ValueError("Requested properties not available.")
         self.include_loss = sorted([prop2index[prop] for prop in include])
-        n_train = len(dataloader)
         Lbak, n_up, self.minimize_log = torch.inf, 0, []
         logmsg  = "\n  SEQC OPTIMIZATION BROUGHT TO YOU BY SLOWCODE, INC."
         logmsg += "\n"+"-"*73
@@ -197,7 +192,7 @@ class AbstractWrapper(ABC, torch.nn.Module):
                     with torch.no_grad():
                         penalty = fail.count_nonzero()*self.SCFfail_penalty[0]
                         penalty_width = self.SCFfail_penalty[1]
-                        offset = last_step * self.SCFfail_penalty[3]
+                        offset = last_step * self.SCFfail_penalty[2]
                         center = x.detach().clone() + offset
                         self.loss_func.add_penalty(center,sigma=penalty_width,
                                                    scale=penalty)

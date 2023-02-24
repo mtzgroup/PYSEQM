@@ -46,19 +46,20 @@ setup(
         'Programming Language :: Python :: 3.7'
         'Programming Language :: Python :: 3.8'
         'Programming Language :: Python :: 3.9'
+        'Programming Language :: Python :: 3.10'
     ],
 
     # What does your project relate to?
     keywords='Semi-Empirical Quantum Mechanics',
 
-    packages=find_packages(exclude=['params', 'tests']),
+    packages=find_packages(exclude=['tests']),
 
     # List run-time dependencies here.  These will be installed by pip when
     # your project is installed. For an analysis of "install_requires" vs pip's
     # requirements files see:
     # https://packaging.python.org/en/latest/requirements.html
     install_requires=['numpy', 'torch>=1.2'],
-    include_package_data=True,
-    package_data={'seqm': ['params/*.csv']},
+#    include_package_data=True,
+#    package_data={'seqm': ['params/*.csv']},
 
 )

@@ -22,7 +22,7 @@ class AMASE_singlepoint_core(torch.nn.Module):
     #TODO: Allow for `reference_desc` to be callable
     #TODO: Typing, some refactoring, clean-up, docs
     def __init__(self, reference_Z, reference_desc, reference_coordinates=None,
-                 seqm_settings={}, mode="full", custom_params=[],
+                 seqm_settings={}, mode="full", custom_params=[], elements=[],
                  use_custom_reference=False):
         super(AMASE_singlepoint_core, self).__init__()
         self.n_ref = torch.count_nonzero(reference_Z)
@@ -30,8 +30,8 @@ class AMASE_singlepoint_core(torch.nn.Module):
         with torch.no_grad():
             self.kernel = ParameterKernel(reference_Z, reference_desc)
         self.seqm_runner = SEQM_singlepoint_core(seqm_settings, mode=mode,
-                                custom_params=custom_params,
-                                use_custom_reference=use_custom_reference)
+                              custom_params=custom_params, elements=elements,
+                              use_custom_reference=use_custom_reference)
         self.results = {}
     
     def forward(self, Alpha, Z, positions, desc, custom_reference=None, expK=1):

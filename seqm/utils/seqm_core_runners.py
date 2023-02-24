@@ -11,9 +11,10 @@
 
 import torch
 from torch.autograd import grad as agrad
-from seqm.basics import Parser, Energy
-from seqm.seqm_functions.constants import Constants
+from ..basics import Parser, Energy
+from ..seqm_functions.constants import Constants
 from .pyseqm_helpers import get_default_parameters
+from ..seqm_functions.parameters import params
 
 
 LFAIL = torch.tensor([1e6])
@@ -49,13 +50,15 @@ class SEQM_singlepoint_core(torch.nn.Module):
     parameter names, and custom reference parameters (`delta` mode, see below)
     are set at runtime.
     
-    Parameters at instantiation:
+    Parameters at initialization:
       . seqm_settings, dict: settings for SEQC calculation
       . mode, str: if 'full', input parameters of call are SEQC parameters
                    if 'delta', SEQC parameters = input + reference params
                    default: 'full'
       . custom_params, list of str: names of custom parameters in p
             default: [] (i.e., use only standard parameters)
+      . elements, torch.Tensor: all elements included in runs after init
+            (this avoids I/O operations to get default parameters at runtime)
       . use_custom_reference, bool: whether to use custom reference parameters
                    for 'delta' mode (p = input + custom_reference)
     
@@ -82,7 +85,7 @@ class SEQM_singlepoint_core(torch.nn.Module):
     
     """
     def __init__(self, seqm_settings={}, mode="full", custom_params=[],
-                 use_custom_reference=False):
+                 elements=[], use_custom_reference=False):
         super(SEQM_singlepoint_core, self).__init__()
         with torch.no_grad():
             self.settings = default_settings
@@ -97,27 +100,39 @@ class SEQM_singlepoint_core(torch.nn.Module):
             if mode == "full":
                 self.process_prediction = self.full_prediction
             elif mode == "delta":
-                if use_custom_reference is False:
-                    if param_dir == "nodirdefined":
-                        msg  = "In 'delta' mode, `seqm_settings` has to include "
-                        msg += "'parameter_file_dir'"
-                        raise ValueError(msg)
-                    self.process_prediction = self.default_delta
-                else:
+                if use_custom_reference:
                     self.process_prediction = self.custom_delta
+                else:
+                    if param_dir == "nodirdefined":
+                        msg  = "In 'delta' mode, `seqm_settings` has to "
+                        msg += " include 'parameter_file_dir'"
+                        raise ValueError(msg)
+                    if elements == []:
+                        msg  = "In 'delta' mode, `elements` has to be "
+                        msg += "defined and non-empty!"
+                        raise ValueError(msg)
+                    elements = sorted(set([0]+elements))
+                    self.default_p = params(method=self.method,
+                                        elements=elements,
+                                        root_dir=self.param_dir,
+                                        parameters=custom_params).to(device)
+                    self.process_prediction = self.default_delta
             else:
                 raise ValueError("Unknown mode '"+mode+"'.")
             self.const = Constants().to(device)
             self.results = {}
-
+        
     def full_prediction(self, par, **kwargs):
         return par
-
+    
     def default_delta(self, par, species=None, **kwargs):
-        p0 = get_default_parameters(species, method=self.settings["method"],
-                        parameter_dir=self.settings["parameter_file_dir"],
-                        param_list=self.custom_params).to(device)
-        p0.requires_grad_(False)
+        nondummy = (species > 0).reshape(-1)
+        Zflat = species.reshape(-1)[nondummy]
+        p0 = self.default_p[Zflat].transpose(-2,-1).contiguous()
+#get_default_parameters(species, method=self.settings["method"],
+#                        parameter_dir=self.settings["parameter_file_dir"],
+#                        param_list=self.custom_params).to(device)
+#        p0.requires_grad_(False)
         return par + p0
 
     def custom_delta(self, par, custom_ref=None, **kwargs):
@@ -138,13 +153,14 @@ class SEQM_singlepoint_core(torch.nn.Module):
         self.settings['learned'] = self.custom_params
         self.settings['eig'] = True
         calc = Energy(self.settings).to(device)
-#        try:
-        res = calc(self.const, coordinates, species, learnedpar, 
-                   all_terms=True)
-#        except RuntimeError:
-#            p.register_hook(lambda grad: grad * LFAIL)
-#            coordinates.register_hook(lambda grad: grad * LFAIL)
-#            return LFAIL, LFAIL, LFAIL*torch.ones_like(xyz), LFAIL
+        try:
+            res = calc(self.const, coordinates, species, learnedpar, 
+                       all_terms=True)
+        except (RuntimeError, torch._C._LinAlgError):
+#            p.register_hook(lambda grad: grad * 0.)
+#            coordinates.register_hook(lambda grad: grad * 0.)
+            res = [LFAIL, LFAIL, LFAIL*torch.ones_like(coordinates), LFAIL]
+            return res, torch.tensor([True,]*species.shape[0])
         masking = torch.where(res[-1], LFAIL, 1.)
         # atomization and total energy
         Eat_fin = res[0] * masking

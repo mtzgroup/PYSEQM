@@ -5,8 +5,8 @@ from torch.nn.utils.rnn import pad_sequence
 from inspect import getfullargspec
 from scipy.optimize import approx_fprime, LinearConstraint, Bounds
 from ase.data import atomic_numbers
-from seqm.basics import Energy
-from seqm.seqm_functions.parameters import params
+from ..basics import Energy
+from ..seqm_functions.parameters import params
 
 
 torch.set_default_dtype(torch.float64)

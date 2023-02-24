@@ -26,9 +26,7 @@ class ParameterKernel(torch.nn.Module):
         K_elm    = torch.pow(K_base, expK)
         return K_elm
     
-    def get_kernel_dict(self, Z, desc, expK=1):
-        nondummy = (Z > 0).reshape(-1)
-        elements = sorted(set(Z.reshape(-1)[nondummy].tolist()))
+    def get_kernel_dict(self, elements, Z, desc, expK=1):
         K_dict = {}
         for elm in elements:
             ## get atomistic neighborhood descriptors for element
@@ -48,7 +46,7 @@ class ParameterKernel(torch.nn.Module):
             elements = sorted(set(Zall.tolist()))
             if any(elm not in self.elements_ref for elm in elements):
                 raise ValueError("Elements in reference and call inconsistent!")
-            K = self.get_kernel_dict(Z, desc, expK=expK)
+            K = self.get_kernel_dict(elements, Z, desc, expK=expK)
         y = torch.zeros((Alpha.shape[0], Zall.numel())).to(Alpha.device)
         Alpha_K = list(map(lambda elm :
                            torch.matmul(Alpha[:,self.idx_ref[elm]], K[elm].to(Alpha.device)),

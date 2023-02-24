@@ -10,8 +10,8 @@
 
 import torch
 from torch.autograd import grad as agrad
-from seqm.basics import Parser, Energy
-from seqm.seqm_functions.constants import Constants
+from ..basics import Parser, Energy
+from ..seqm_functions.constants import Constants
 from .pyseqm_helpers import prepare_array, get_default_parameters
 from .abstract_base_loss import AbstractLoss
 from .seqm_core_runners import SEQM_multirun_core

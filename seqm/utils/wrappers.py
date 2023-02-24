@@ -11,8 +11,8 @@ import torch
 from torch.autograd import grad as agrad
 from torch.nn.utils.rnn import pad_sequence
 from itertools import chain
-from seqm.basics import Energy, Parser
-from seqm.seqm_functions.constants import Constants
+from ..basics import Energy, Parser
+from ..seqm_functions.constants import Constants
 from .pyseqm_helpers import prepare_array, Orderator, get_default_parameters
 from .abstract_base_wrapper import AbstractWrapper
 from .kernels import ParameterKernel
@@ -44,10 +44,13 @@ default_settings = {
 
 
 class SEQM_singlepoint(torch.nn.Module):
-    def __init__(self, seqm_settings={}, mode="full"):
+    def __init__(self, seqm_settings={}, mode="full", custom_params=[], 
+                 elements=[], use_custom_reference=False):
         super(SEQM_singlepoint, self).__init__()
         self.settings = seqm_settings
-        self.core_runner = SEQM_singlepoint_core(seqm_settings, mode=mode)
+        self.core_runner = SEQM_singlepoint_core(seqm_settings, mode=mode,
+                            custom_params=custom_params, elements=elements,
+                            use_custom_reference=use_custom_reference)
     
     def forward(self, p, species, coordinates, custom_params=[], mode="full",
                 custom_reference=None):
@@ -177,20 +180,27 @@ class elementwiseSEQM_trainer(AbstractWrapper):
     """
     Concrete wrapper for SEQC calculations with elementwise parameters.
     
-    Parameters at instantiation:
+    Parameters at initialization:
     ----------------------------
       . custom_params, list: names of custom parameters (to optimize)
-      . mode, str: if 'full' learn total parameters, 'delta': learn Delta
       . seqm_settings, dict: settings for SEQC calculations
+      . mode, str: if 'full' learn total parameters, 'delta': learn Delta
+      . elements, list: list of elements (atomic numbers)
+      . use_custom_reference, bool: whether or not to use custom reference
+            parameters in 'delta' mode (p = input + custom_reference)
+      . loss_type, str: type of loss function to use when running model.train
+      . loss_args, tuple: additional arguments to loss function initialization
+      . loss_kwargs, dict: kwargs for loss initialization
+
     """
     def __init__(self, custom_params=[], seqm_settings=None, mode="full",
-                 use_custom_reference=False, loss_type="RSSperAtom", 
-                 loss_args=(), loss_kwargs={}):
+                 elements=[], use_custom_reference=False,
+                 loss_type="RSSperAtom", loss_args=(), loss_kwargs={}):
         super(elementwiseSEQM_trainer, self).__init__(custom_params=custom_params,
                                 loss_type=loss_type, loss_args=loss_args,
                                 loss_kwargs=loss_kwargs)
         self.core_runner = SEQM_singlepoint_core(seqm_settings, mode=mode,
-                                custom_params=custom_params,
+                                custom_params=custom_params, elements=elements,
                                 use_custom_reference=use_custom_reference)
     
     def forward(self, p_elm, species, coordinates, custom_reference=None):
@@ -205,7 +215,7 @@ class elementwiseSEQM_trainer(AbstractWrapper):
           . species, list/torch.Tensor: atomic numbers ordered in descending order
           . coordinates, list/torch.Tensor: coordinates ordered accordingly
           . custom_reference, torch.Tensor: if in 'delta' mode:
-            p = custom_reference + input, default: use standard parameters
+                p = custom_reference + input, default: use standard parameters
         """
         # create maps for elementwise parameters (input) to actual parameters
         nondummy = (species > 0).reshape(-1)
@@ -234,18 +244,25 @@ class SEQM_trainer(AbstractWrapper):
     Parameters at instantiation:
     ----------------------------
       . custom_params, list: names of custom parameters (to optimize)
-      . mode, str: if 'full' learn total parameters, 'delta': learn Delta
       . seqm_settings, dict: settings for SEQC calculations
+      . mode, str: if 'full' learn total parameters, 'delta': learn Delta
+      . elements, list: list of elements (atomic numbers)
+      . use_custom_reference, bool: whether or not to use custom reference
+            parameters in 'delta' mode (p = input + custom_reference)
+      . loss_type, str: type of loss function to use when running model.train
+      . loss_args, tuple: additional arguments to loss function initialization
+      . loss_kwargs, dict: kwargs for loss initialization
+    
     """
     def __init__(self, custom_params=[], seqm_settings=None, mode="full",
-                 use_custom_reference=False, loss_type="RSSperAtom", 
-                 loss_args=(), loss_kwargs={}):
+                 elements=[], use_custom_reference=False, 
+                 loss_type="RSSperAtom", loss_args=(), loss_kwargs={}):
         super(SEQM_trainer, self).__init__(custom_params=custom_params,
                                 loss_type=loss_type, loss_args=loss_args,
                                 loss_kwargs=loss_kwargs)
         self.core_runner = SEQM_singlepoint_core(seqm_settings, mode=mode,
-                                custom_params=custom_params,
-                                use_custom_reference=use_custom_reference)
+                              custom_params=custom_params, elements=elements,
+                              use_custom_reference=use_custom_reference)
     
     def forward(self, p, species, coordinates, custom_reference=None):
         """
@@ -282,8 +299,8 @@ class AMASE_trainer(AbstractWrapper):
     """
     def __init__(self, reference_Z, reference_desc, reference_coordinates=None,
                  custom_params=None, seqm_settings=None, mode="full",
-                 use_custom_reference=False, expK=1, loss_type="RSSperAtom",
-                 loss_args=(), loss_kwargs={}):
+                 elements=[], use_custom_reference=False, 
+                 loss_type="RSSperAtom", loss_args=(), loss_kwargs={}):
         super(AMASE_trainer, self).__init__(custom_params=custom_params,
                                 loss_type=loss_type, loss_args=loss_args,
                                 loss_kwargs=loss_kwargs)
@@ -297,7 +314,7 @@ class AMASE_trainer(AbstractWrapper):
         reference_desc = reference_desc.to(device)
         self.core_runner = AMASE_singlepoint_core(reference_Z, reference_desc,
                                  reference_coordinates=reference_coordinates,
-                                 custom_params=custom_params,
+                                 custom_params=custom_params, elements=elements,
                                  use_custom_reference=use_custom_reference,
                                  seqm_settings=seqm_settings, mode=mode)
 

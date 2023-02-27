@@ -6,6 +6,7 @@
 # Current (Feb/20)                                                          #
 # TODO: . typing                                                            #
 #       . Improvement of GPU performance?                                   #
+#       . parallel training (GPU mode: DistributedDataParallel, CPU: MPI?)  #
 #       . enable optimization of only select atoms/elements (mask grad)     #
 #############################################################################
 
@@ -13,7 +14,6 @@ import torch
 from warnings import warn
 from abc import ABC, abstractmethod
 from torch.autograd import grad as agrad
-from .pyseqm_helpers import prepare_array, Orderator
 from .loss_functions import *
 
 torch.set_default_dtype(torch.float64)
@@ -26,7 +26,7 @@ prop2index = {'atomization':0, 'energy':1, 'forces':2, 'gap':3}
 class NoScheduler:
     """ Dummy scheduler class. """
     def __init__(self): pass
-    def step(self): pass
+    def step(self, metrics=0.): pass
 
 
 class AbstractWrapper(ABC, torch.nn.Module):
@@ -38,18 +38,22 @@ class AbstractWrapper(ABC, torch.nn.Module):
     Individual, concrete loss modules have to extend base `__init__`
     and provide a corresponding implementation of `self.run_calculation(x)`.
     """
-    def __init__(self, custom_params=None, loss_type="RSSperAtom",
+    def __init__(self, custom_params=None, loss_include=[], 
+                 SCFfail_penalty=[1e2,5e-3,1e-6], loss_type="RSSperAtom",
                  loss_args=(), loss_kwargs={}):
         ## initialize parent modules and attributes
         super(AbstractWrapper, self).__init__()
         self.implemented_properties = ['atomization','energy','forces','gap']
-        self.n_implemented = len(self.implemented_properties)
         self.is_extensive = [True, True, True, False]
         self.implemented_loss_types = ["RSSperAtom"]
         ## collect attributes from input
         if loss_type not in self.implemented_loss_types:
             raise ValueError("Unknown loss type '"+loss_type+"'.")
         exec("self.loss_func = "+loss_type+"(*loss_args, **loss_kwargs)")
+        self.SCFfail_penalty = SCFfail_penalty
+        if any(prop not in self.implemented_properties for prop in loss_include):
+            raise ValueError("Requested property/ies not available.")
+        self.include_loss = sorted([prop2index[prop] for prop in loss_include])
         self.custom_params = custom_params
         
     
@@ -65,7 +69,7 @@ class AbstractWrapper(ABC, torch.nn.Module):
     def train(self, x, dataloader, n_epochs=4, include=[], optimizer="Adam",
               opt_kwargs={}, opt_mode="stochastic", n_up_thresh=5, up_thresh=1e-4,
               loss_conv=1e-8, loss_step_conv=1e-8, scheduler=None, scheduler_kwargs={},
-              validation_loader=None, SCFfail_penalty=[1e2,1e-3,1e-5]):
+              validation_loader=None, SCFfail_penalty=[1e2,5e-3,1e-6]):
         """
         Generic routine for minimizing loss.
         
@@ -151,6 +155,8 @@ class AbstractWrapper(ABC, torch.nn.Module):
         self.last_x = x.detach().clone()
         for epoch in range(n_epochs):
             L_epoch = self.train_epoch(x, dataloader)
+            if not np.isfinite(L_epoch):
+                raise RuntimeError("Current loss (",L_epoch,") is not finite!")
             if L_epoch < loss_conv:
                 print("Reached convergence criterion {0:3.2e}.".format(loss_conv))
                 break
@@ -187,19 +193,19 @@ class AbstractWrapper(ABC, torch.nn.Module):
         
     
     def train_stochastic(self, x, dataloader):
-        Ltot, ntot = 0., 0.
+        Ltot, self.ntot_tst = 0., 0.
         for (inputs, refs, weights) in dataloader:
             inputs = [inp.to(device) for inp in inputs]
             refs = [ref.to(device) for ref in refs]
             weights = [w.to(device) for w in weights]
-            ntot += inputs[0].shape[0]
+            self.ntot_tst += inputs[0].shape[0]
             nAtoms = torch.count_nonzero(inputs[0], dim=1)
             last_step = x.detach().clone() - self.last_x
             def closure():
                 self.opt.zero_grad()
                 res, fail = self(x, *inputs)
                 if fail.any():
-                    ntot -= fail.count_nonzero()
+                    self.ntot_tst -= fail.count_nonzero()
                     with torch.no_grad():
                         penalty = fail.count_nonzero()*self.SCFfail_penalty[0]
                         penalty_width = self.SCFfail_penalty[1]
@@ -215,15 +221,14 @@ class AbstractWrapper(ABC, torch.nn.Module):
             self.last_x = x.detach().clone()
             L = self.opt.step(closure)
             Ltot += L.item()
-        return Ltot / ntot
+        return Ltot / self.ntot_tst
         
     
     def train_full(self, x, dataloader):
-        Lbatches = torch.zeros(len(dataloader))
         def closure():
-            ntot = 0.
+            ntot, Ltot = 0., torch.tensor(0., requires_grad=True, device=device)
             self.opt.zero_grad()
-            for ib, (inputs, refs, weights) in enumerate(dataloader):
+            for (inputs, refs, weights) in dataloader:
                 inputs = [inp.to(device) for inp in inputs]
                 refs = [ref.to(device) for ref in refs]
                 weights = [w.to(device) for w in weights]
@@ -243,8 +248,8 @@ class AbstractWrapper(ABC, torch.nn.Module):
                 loss = self.loss_func(res, refs, x, nAtoms=nAtoms,
                             weights=weights, include=self.include_loss,
                             extensive=self.is_extensive, masking=fail)
-                Lbatches[ib] = loss
-            Ltot = Lbatches.sum() / ntot
+                Ltot = Ltot + loss
+            Ltot = Ltot / ntot
             Ltot.backward()
             return Ltot
         self.last_x = x.detach().clone()
@@ -262,9 +267,10 @@ class AbstractWrapper(ABC, torch.nn.Module):
             nval += inputs[0].shape[0]
             nAtoms = torch.count_nonzero(inputs[0], dim=1)
             res, failed = self(x, *inputs)
+            nval -= failed.count_nonzero()
             loss = self.loss_func(res, refs, nAtoms=nAtoms, 
                             weights=weights, include=self.include_loss,
-                            extensive=self.is_extensive)
+                            extensive=self.is_extensive, masking=failed)
             Lval += loss.item()
         return Lval / nval
         
@@ -278,11 +284,50 @@ class AbstractWrapper(ABC, torch.nn.Module):
             ntot += inputs[0].shape[0]
             nAtoms = torch.count_nonzero(inputs[0], dim=1)
             res, failed = self(x, *inputs)
+            if failed.any():
+                n_fail = failed.count_nonzero()
+                ntot -= n_fail
+                with torch.no_grad():
+                    penalty = n_fail * self.SCFfail_penalty[0]
+                    penalty_width = self.SCFfail_penalty[1]
+                    center = x.detach().clone()
+                    self.loss_func.add_penalty(center,sigma=penalty_width,
+                                               scale=penalty)
             L = self.loss_func(res, refs, nAtoms=nAtoms,
                                weights=weights, include=self.include_loss,
-                               extensive=self.is_extensive)
+                               extensive=self.is_extensive, masking=failed)
             Ltot += L.item()
         return Ltot / ntot
+        
+    
+    def loss_and_grad(self, x, dataloader):
+        Ltot, ntot = 0., 0.
+        dLdx = torch.zeros_like(x, requires_grad=False, device=device)
+        for (inputs, refs, weights) in dataloader:
+            if x.grad is not None: x.grad.zero_()
+            inputs = [inp.to(device) for inp in inputs]
+            refs = [ref.to(device) for ref in refs]
+            weights = [w.to(device) for w in weights]
+            ntot += inputs[0].shape[0]
+            nAtoms = torch.count_nonzero(inputs[0], dim=1)
+            res, failed = self(x, *inputs)
+            if failed.any():
+                n_fail = failed.count_nonzero()
+                ntot -= n_fail
+                with torch.no_grad():
+                    penalty = n_fail * self.SCFfail_penalty[0]
+                    penalty_width = self.SCFfail_penalty[1]
+                    center = x.detach().clone()
+                    self.loss_func.add_penalty(center, sigma=penalty_width,
+                                               scale=penalty)
+            L = self.loss_func(res, refs, nAtoms=nAtoms,
+                               weights=weights, include=self.include_loss,
+                               extensive=self.is_extensive, masking=failed)
+            subgrad = agrad(L, x)[0]
+            dLdx = dLdx + subgrad.detach().clone()
+            Ltot = Ltot + L.item()
+        Ltot, dLdx = Ltot / ntot, dLdx / ntot
+        return Ltot, dLdx
         
     
     def add_scheduler(self, scheduler, optimizer, sched_kwargs={}):
@@ -338,26 +383,3 @@ class AbstractWrapper(ABC, torch.nn.Module):
             msg = "Unrecognized type '"+type(scheduler)+"' for 'scheduler'"
             raise ValueError(msg)
         
-    
-    def process_reference(self, prop, ref):
-        if ref is None: return None
-        if prop == "forces":
-            ref_proc = prepare_array(ref, 'reference forces')
-        if torch.is_tensor(ref):
-            ref_proc = ref
-        elif type(ref) in [int, float]:
-            ref_proc = torch.tensor([ref])
-        elif type(ref) == list:
-            ref_proc = torch.tensor(ref)
-        else:
-            raise ValueError("Unrecognized type of reference "+prop)
-        self.include_loss.append(prop2index[prop])
-        return ref_proc
-
-    
-    def gradient(self, x):
-        """ Return gradient of loss w.r.t. input x at x. """
-        L = self(x)
-        dLdx = agrad(L, x, retain_graph=True)[0]
-        return dLdx
-   

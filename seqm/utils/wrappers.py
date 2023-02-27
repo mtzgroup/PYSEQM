@@ -194,11 +194,13 @@ class elementwiseSEQM_trainer(AbstractWrapper):
 
     """
     def __init__(self, custom_params=[], seqm_settings=None, mode="full",
-                 elements=[], use_custom_reference=False,
-                 loss_type="RSSperAtom", loss_args=(), loss_kwargs={}):
+                 elements=[], use_custom_reference=False, loss_include=[],
+                 loss_type="RSSperAtom", loss_args=(), loss_kwargs={},
+                 SCFfail_penalty=[1e2,1e-3,1e-5]):
         super(elementwiseSEQM_trainer, self).__init__(custom_params=custom_params,
-                                loss_type=loss_type, loss_args=loss_args,
-                                loss_kwargs=loss_kwargs)
+                                loss_include=loss_include, loss_type=loss_type,
+                                loss_args=loss_args, loss_kwargs=loss_kwargs,
+                                SCFfail_penalty=SCFfail_penalty)
         self.core_runner = SEQM_singlepoint_core(seqm_settings, mode=mode,
                                 custom_params=custom_params, elements=elements,
                                 use_custom_reference=use_custom_reference)
@@ -255,11 +257,13 @@ class SEQM_trainer(AbstractWrapper):
     
     """
     def __init__(self, custom_params=[], seqm_settings=None, mode="full",
-                 elements=[], use_custom_reference=False, 
-                 loss_type="RSSperAtom", loss_args=(), loss_kwargs={}):
+                 elements=[], use_custom_reference=False, loss_include=[],
+                 loss_type="RSSperAtom", loss_args=(), loss_kwargs={},
+                 SCFfail_penalty=[1e2,1e-3,1e-5]):
         super(SEQM_trainer, self).__init__(custom_params=custom_params,
-                                loss_type=loss_type, loss_args=loss_args,
-                                loss_kwargs=loss_kwargs)
+                                loss_include=loss_include, loss_type=loss_type,
+                                loss_args=loss_args, loss_kwargs=loss_kwargs,
+                                SCFfail_penalty=SCFfail_penalty)
         self.core_runner = SEQM_singlepoint_core(seqm_settings, mode=mode,
                               custom_params=custom_params, elements=elements,
                               use_custom_reference=use_custom_reference)
@@ -299,11 +303,13 @@ class AMASE_trainer(AbstractWrapper):
     """
     def __init__(self, reference_Z, reference_desc, reference_coordinates=None,
                  custom_params=None, seqm_settings=None, mode="full",
-                 elements=[], use_custom_reference=False, 
-                 loss_type="RSSperAtom", loss_args=(), loss_kwargs={}):
+                 elements=[], use_custom_reference=False, loss_include=[],
+                 loss_type="RSSperAtom", loss_args=(), loss_kwargs={},
+                 SCFfail_penalty=[1e2,1e-3,1e-5]):
         super(AMASE_trainer, self).__init__(custom_params=custom_params,
-                                loss_type=loss_type, loss_args=loss_args,
-                                loss_kwargs=loss_kwargs)
+                                loss_include=loss_include, loss_type=loss_type,
+                                loss_args=loss_args, loss_kwargs=loss_kwargs,
+                                SCFfail_penalty=SCFfail_penalty)
         if isinstance(reference_Z, list):
             with torch.no_grad():
                 reference_Z = pad_sequence(reference_Z, batch_first=True)
@@ -319,8 +325,6 @@ class AMASE_trainer(AbstractWrapper):
                                  seqm_settings=seqm_settings, mode=mode)
 
     def forward(self, A, species, coordinates, desc, expK=1, custom_reference=None):
-#        species = species.to(device)
-#        coordinates = coordinates.to(device)
         coordinates.requires_grad_(True)
         res, failed = self.core_runner(A, species, coordinates, desc, expK=expK,
                                custom_reference=custom_reference)

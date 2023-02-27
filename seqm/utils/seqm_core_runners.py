@@ -156,7 +156,7 @@ class SEQM_singlepoint_core(torch.nn.Module):
         try:
             res = calc(self.const, coordinates, species, learnedpar, 
                        all_terms=True)
-        except (RuntimeError, torch._C._LinAlgError):
+        except:# (RuntimeError, torch._C._LinAlgError):
 #            p.register_hook(lambda grad: grad * 0.)
 #            coordinates.register_hook(lambda grad: grad * 0.)
             res = [LFAIL, LFAIL, LFAIL*torch.ones_like(coordinates), LFAIL]
@@ -281,7 +281,7 @@ class SEQM_multirun_core(torch.nn.Module):
         try:
             res = self.calc(self.const, self.xyz, self.Z, learnedpar,
                             all_terms=True)
-        except RuntimeError:
+        except:
             p.register_hook(lambda grad: grad * LFAIL)
             self.xyz.register_hook(lambda grad: grad * LFAIL)
             return LFAIL, LFAIL, LFAIL*torch.ones_like(self.xyz), LFAIL

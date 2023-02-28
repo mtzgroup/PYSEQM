@@ -129,10 +129,7 @@ class SEQM_singlepoint_core(torch.nn.Module):
         nondummy = (species > 0).reshape(-1)
         Zflat = species.reshape(-1)[nondummy]
         p0 = self.default_p[Zflat].transpose(-2,-1).contiguous()
-#get_default_parameters(species, method=self.settings["method"],
-#                        parameter_dir=self.settings["parameter_file_dir"],
-#                        param_list=self.custom_params).to(device)
-#        p0.requires_grad_(False)
+        p0.requires_grad_(False)
         return par + p0
 
     def custom_delta(self, par, custom_ref=None, **kwargs):
@@ -149,9 +146,10 @@ class SEQM_singlepoint_core(torch.nn.Module):
         p_in = self.process_prediction(p, species=species,
                                        reference_par=custom_reference)
         learnedpar = {par:p_in[i] for i, par in enumerate(self.custom_params)}
-        self.settings['elements'] = torch.tensor(elements)
+        self.settings['elements'] = torch.tensor(elements, requires_grad=False)
         self.settings['learned'] = self.custom_params
         self.settings['eig'] = True
+        coordinates.requires_grad_(True)
         calc = Energy(self.settings).to(device)
         try:
             res = calc(self.const, coordinates, species, learnedpar, 
@@ -168,6 +166,7 @@ class SEQM_singlepoint_core(torch.nn.Module):
         # forces
         F = -agrad(res[1].sum(), coordinates, create_graph=True)[0]
         F_fin = F * masking[...,None,None]
+        coordinates.requires_grad_(False)
         # HOMO-LUMO gap
         my_parser = Parser(calc.seqm_parameters)
         n_occ = my_parser(self.const, species, coordinates)[4]

@@ -19,16 +19,19 @@ class AbstractLoader(ABC, Dataset):
                  gap_weight=1.):
         super(AbstractLoader, self).__init__()
         self.species = pad_sequence(species, batch_first=True)
+        self.species.requires_grad_(False)
         self.nMols = self.species.shape[0]
         self.coordinates = pad_sequence(coordinates, batch_first=True)
-        self.Eat_ref = torch.tensor(atomization_ref)
-        self.Etot_ref = torch.tensor(energy_ref)
+        self.coordinates.requires_grad_(False)
+        self.Eat_ref = torch.tensor(atomization_ref, requires_grad=False)
+        self.Etot_ref = torch.tensor(energy_ref, requires_grad=False)
         self.F_ref = pad_sequence(forces_ref, batch_first=True)
-        self.gap_ref = torch.tensor(gap_ref)
-        self.Eat_weight = torch.tensor(atomization_weight)
-        self.Etot_weight = torch.tensor(energy_weight)
-        self.F_weight = torch.tensor(forces_weight)
-        self.gap_weight = torch.tensor(gap_weight)
+        self.F_ref.requires_grad_(False)
+        self.gap_ref = torch.tensor(gap_ref, requires_grad=False)
+        self.Eat_weight = torch.tensor(atomization_weight, requires_grad=False)
+        self.Etot_weight = torch.tensor(energy_weight, requires_grad=False)
+        self.F_weight = torch.tensor(forces_weight, requires_grad=False)
+        self.gap_weight = torch.tensor(gap_weight, requires_grad=False)
 
     def __len__(self): return self.nMols
 
@@ -78,6 +81,7 @@ class AMASE_data(AbstractLoader):
                         forces_ref=forces_ref, forces_weight=forces_weight,
                         gap_ref=gap_ref, gap_weight=gap_weight)
         self.desc = pad_sequence(desc, batch_first=True)
+        self.desc.requires_grad_(False)
         
     def __getitem__(self, idx):
         inputs = (self.species[idx], self.coordinates[idx], self.desc[idx])

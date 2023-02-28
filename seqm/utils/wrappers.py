@@ -227,7 +227,6 @@ class elementwiseSEQM_trainer(AbstractWrapper):
         p = torch.stack([p_elm[:,map_i] for map_i in elm_map]).T.to(device)
         species = species.to(device)
         coordinates = coordinates.to(device)
-        coordinates.requires_grad_(True)
         res, failed = self.core_runner(p, species, coordinates,
                                custom_reference=custom_reference)
         self.results = self.core_runner.results
@@ -282,9 +281,6 @@ class SEQM_trainer(AbstractWrapper):
           . custom_reference, torch.Tensor: if in 'delta' mode:
             p = custom_reference + input, default: use standard parameters
         """
-#        species = species.to(device)
-#        coordinates = coordinates.to(device)
-        coordinates.requires_grad_(True)
         res, failed = self.core_runner(p, species, coordinates,
                                custom_reference=custom_reference)
         self.results = self.core_runner.results
@@ -325,7 +321,6 @@ class AMASE_trainer(AbstractWrapper):
                                  seqm_settings=seqm_settings, mode=mode)
 
     def forward(self, A, species, coordinates, desc, expK=1, custom_reference=None):
-        coordinates.requires_grad_(True)
         res, failed = self.core_runner(A, species, coordinates, desc, expK=expK,
                                custom_reference=custom_reference)
         self.results = self.core_runner.results

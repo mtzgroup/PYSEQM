@@ -30,9 +30,12 @@ class RSSperAtom(torch.nn.Module):
           else: sum_A (sum_{i,...} (predicted_{A,i,...} 
                                       - reference_{A,i,...})^2) / nAtoms_A
     """
-    def __init__(self):
+    def __init__(self, n_implemented_properties=4, regularizer=0.):
         super(RSSperAtom, self).__init__()
         self.penalties = []
+        self.raw_loss = 0.
+        self.individual_loss = torch.tensor([0.,]*n_implemented_properties)
+        self.reg = regularizer
     
     def forward(self, predictions, references, x=0., nAtoms=[], weights=[], 
                 extensive=[], include=[], masking=None):
@@ -52,8 +55,11 @@ class RSSperAtom(torch.nn.Module):
                 my_RSS = (masked_delta2_w / nAtoms).sum()
             else:
                 my_RSS = masked_delta2_w.sum()
+            self.individual_loss[i] += my_RSS.item()
             loss = loss + my_RSS
+        self.raw_loss += loss.item()
         for pen in self.penalties: loss = loss + pen(x)
+        loss = loss + self.reg * torch.square(x).sum()
         return loss
     
     def add_penalty(self, center, sigma=0.01, scale=1.):

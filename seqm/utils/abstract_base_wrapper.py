@@ -288,7 +288,7 @@ class AbstractWrapper(ABC, torch.nn.Module):
         return Lval / nval
         
     
-    def get_loss(self, x, dataloader):
+    def get_loss(self, x, dataloader, raw=False):
         x.requires_grad_(False)
         self.loss_func.raw_loss = 0.
         self.loss_func.individual_loss[:] = 0.
@@ -314,9 +314,11 @@ class AbstractWrapper(ABC, torch.nn.Module):
                                extensive=self.is_extensive, masking=failed)
             Ltot += L.item()
         ntot = max(ntot, 1)
+        Ltot = Ltot / ntot
         self.raw_loss = self.loss_func.raw_loss / ntot
         self.individual_loss = self.loss_func.individual_loss / ntot
-        return Ltot / ntot
+        Lout = self.raw_loss if raw else Ltot
+        return Lout
         
     
     def loss_and_grad(self, x, dataloader):
@@ -333,7 +335,7 @@ class AbstractWrapper(ABC, torch.nn.Module):
             res, failed = self(x, *inputs)
             if failed.any():
                 n_fail = failed.count_nonzero()
-                ntot -= n_fail
+                ntot -= n_fail.item()
                 last_step = x.detach().clone() - self.last_x
                 with torch.no_grad():
                     penalty = n_fail * self.SCFfail_penalty[0]

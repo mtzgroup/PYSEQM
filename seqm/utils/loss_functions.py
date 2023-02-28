@@ -37,8 +37,9 @@ class RSSperAtom(torch.nn.Module):
         self.individual_loss = torch.tensor([0.,]*n_implemented_properties)
         self.reg = regularizer
     
-    def forward(self, predictions, references, x=0., nAtoms=[], weights=[], 
+    def forward(self, predictions, references, x=None, nAtoms=[], weights=[], 
                 extensive=[], include=[], masking=None):
+        if x is None: x = torch.tensor(0., requires_grad=False)
         if masking is None:
             masking = torch.tensor([False,]*predictions[0].shape[0])
         loss_mask = torch.where(masking, 0., 1.)

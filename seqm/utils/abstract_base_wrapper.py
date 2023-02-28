@@ -170,7 +170,8 @@ class AbstractWrapper(ABC, torch.nn.Module):
             if n_up > n_up_thresh:
                 msg  = "Loss increased by {0:3.1e} more than ".format(up_thresh)
                 msg += str(n_up_thresh)+" times. This may indicate a failure in"
-                msg += " training. You can adjust this limit via 'up_thresh'."
+                msg += " training. You can adjust this limit via 'up_thresh' "
+                msg += "and 'n_up_thresh'."
                 raise RuntimeError(msg)
             Lbak = L_epoch
             for sched in lr_sched: sched.step(metrics=L_epoch)

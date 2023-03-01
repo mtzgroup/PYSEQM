@@ -337,9 +337,9 @@ class AbstractWrapper(ABC, torch.nn.Module):
             nAtoms = torch.count_nonzero(inputs[0], dim=1)
             res, failed = self(x, *inputs)
             if failed.any():
-                n_fail = failed.count_nonzero()
-                nfail_tot += n_fail.item()
-                ntot -= n_fail.item()
+                n_fail = failed.count_nonzero().item()
+                nfail_tot += n_fail
+                ntot -= n_fail
                 last_step = x.detach().clone() - self.last_x
 #                with torch.no_grad():
 #                    penalty = n_fail * self.SCFfail_penalty[0]
@@ -354,16 +354,14 @@ class AbstractWrapper(ABC, torch.nn.Module):
             subgrad = agrad(L, x)[0]
             dLdx = dLdx + subgrad
             Ltot = Ltot + L.item()
+        if nfail_tot > 0: print(nfail_tot," molecules not converged.")
         self.last_x = x.detach().clone()
         ntot = max(ntot, 1)
         self.raw_loss = self.loss_func.raw_loss / ntot
         self.individual_loss = self.loss_func.individual_loss / ntot
-        Ltot, dLdx = Ltot / ntot, dLdx / ntot
-        if k_fail and (nfail_tot > 0):
-            Lout = 1e3 * nfail_tot + self.raw_loss
-            k_grad = 1e3 * torch.ones_like(dLdx) * nfail_tot + dLdx
-            return Lout, k_grad.detach().numpy()
-        return Ltot, dLdx.detach().numpy()
+        Lout, dLdx = Ltot / ntot, dLdx / ntot
+        if k_fail and (nfail_tot > 0): Lout = 1e3 * nfail_tot + self.raw_loss
+        return Lout, dLdx.detach().numpy()
         
     
     def add_scheduler(self, scheduler, optimizer, sched_kwargs={}):

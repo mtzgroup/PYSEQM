@@ -40,7 +40,7 @@ class AbstractWrapper(ABC, torch.nn.Module):
     and provide a corresponding implementation of `self.run_calculation(x)`.
     """
     def __init__(self, custom_params=None, loss_include=[], 
-                 SCFfail_penalty=[1e2,1e-3,1e-6], loss_type="RSSperAtom",
+                 SCFfail_penalty=[1e2,1e-5,1e-6], loss_type="RSSperAtom",
                  loss_args=(), loss_kwargs={}):
         ## initialize parent modules and attributes
         super(AbstractWrapper, self).__init__()
@@ -73,7 +73,7 @@ class AbstractWrapper(ABC, torch.nn.Module):
     def train(self, x, dataloader, n_epochs=4, include=[], optimizer="Adam",
               opt_kwargs={}, opt_mode="stochastic", n_up_thresh=5, up_thresh=1e-4,
               loss_conv=1e-8, loss_step_conv=1e-8, scheduler=None, scheduler_kwargs={},
-              validation_loader=None, SCFfail_penalty=[1e2,5e-3,1e-6]):
+              validation_loader=None, SCFfail_penalty=[1e2,1e-5,1e-6]):
         """
         Generic routine for minimizing loss.
         
@@ -208,13 +208,13 @@ class AbstractWrapper(ABC, torch.nn.Module):
                 res, fail = self(x, *inputs)
                 if fail.any():
                     self.ntot_tst -= fail.count_nonzero()
-                    with torch.no_grad():
-                        penalty = fail.count_nonzero()*self.SCFfail_penalty[0]
-                        penalty_width = self.SCFfail_penalty[1]
-                        offset = last_step * self.SCFfail_penalty[2]
-                        center = x.detach().clone() + offset
-                        self.loss_func.add_penalty(center,sigma=penalty_width,
-                                                   scale=penalty)
+#                    with torch.no_grad():
+#                        penalty = fail.count_nonzero()*self.SCFfail_penalty[0]
+#                        penalty_width = self.SCFfail_penalty[1]
+#                        offset = last_step * self.SCFfail_penalty[2]
+#                        center = x.detach().clone() + offset
+#                        self.loss_func.add_penalty(center,sigma=penalty_width,
+#                                                   scale=penalty)
                 loss = self.loss_func(res, refs, x, nAtoms=nAtoms, 
                             weights=weights, include=self.include_loss,
                             extensive=self.is_extensive, masking=fail)
@@ -246,13 +246,13 @@ class AbstractWrapper(ABC, torch.nn.Module):
                 res, fail = self(x, *inputs)
                 if fail.any():
                     ntot -= fail.count_nonzero()
-                    with torch.no_grad():
-                        penalty = fail.count_nonzero()*self.SCFfail_penalty[0]
-                        penalty_width = self.SCFfail_penalty[1]
-                        offset = last_step * self.SCFfail_penalty[2]
-                        center = x.detach().clone() + offset
-                        self.loss_func.add_penalty(center,sigma=penalty_width,
-                                                   scale=penalty)
+#                    with torch.no_grad():
+#                        penalty = fail.count_nonzero()*self.SCFfail_penalty[0]
+#                        penalty_width = self.SCFfail_penalty[1]
+#                        offset = last_step * self.SCFfail_penalty[2]
+#                        center = x.detach().clone() + offset
+#                        self.loss_func.add_penalty(center,sigma=penalty_width,
+#                                                   scale=penalty)
                 loss = self.loss_func(res, refs, x, nAtoms=nAtoms,
                             weights=weights, include=self.include_loss,
                             extensive=self.is_extensive, masking=fail)
@@ -280,7 +280,7 @@ class AbstractWrapper(ABC, torch.nn.Module):
             nval += inputs[0].shape[0]
             nAtoms = torch.count_nonzero(inputs[0], dim=1)
             res, failed = self(x, *inputs)
-            nval -= failed.count_nonzero()
+            nval -= failed.count_nonzero().item()
             loss = self.loss_func(res, refs, x, nAtoms=nAtoms, 
                             weights=weights, include=self.include_loss,
                             extensive=self.is_extensive, masking=failed)
@@ -289,11 +289,11 @@ class AbstractWrapper(ABC, torch.nn.Module):
         return Lval / nval
         
     
-    def get_loss(self, x, dataloader, raw=False):
+    def get_loss(self, x, dataloader, k_fail=False):
         x.requires_grad_(False)
         self.loss_func.raw_loss = 0.
         self.loss_func.individual_loss[:] = 0.
-        Ltot, ntot = 0., 0.
+        Ltot, ntot, nfail_tot = 0., 0., 0
         for (inputs, refs, weights) in dataloader:
             inputs = [inp.to(device) for inp in inputs]
             refs = [ref.to(device) for ref in refs]
@@ -303,13 +303,14 @@ class AbstractWrapper(ABC, torch.nn.Module):
             res, failed = self(x, *inputs)
             if failed.any():
                 n_fail = failed.count_nonzero()
-                ntot -= n_fail
-                with torch.no_grad():
-                    penalty = n_fail * self.SCFfail_penalty[0]
-                    penalty_width = self.SCFfail_penalty[1]
-                    center = x.detach().clone()
-                    self.loss_func.add_penalty(center,sigma=penalty_width,
-                                               scale=penalty)
+                nfail_tot += n_fail.item()
+                ntot -= n_fail.item()
+#                with torch.no_grad():
+#                    penalty = n_fail * self.SCFfail_penalty[0]
+#                    penalty_width = self.SCFfail_penalty[1]
+#                    center = x.detach().clone()
+#                    self.loss_func.add_penalty(center,sigma=penalty_width,
+#                                               scale=penalty)
             L = self.loss_func(res, refs, x, nAtoms=nAtoms,
                                weights=weights, include=self.include_loss,
                                extensive=self.is_extensive, masking=failed)
@@ -318,12 +319,13 @@ class AbstractWrapper(ABC, torch.nn.Module):
         Ltot = Ltot / ntot
         self.raw_loss = self.loss_func.raw_loss / ntot
         self.individual_loss = self.loss_func.individual_loss / ntot
-        Lout = self.raw_loss if raw else Ltot
-        return Lout
+        if k_fail and (nfail_tot > 0):
+            return 1e3 * nfail_tot + self.raw_loss
+        return Ltot
         
     
-    def loss_and_grad(self, x, dataloader):
-        Ltot, ntot = 0., 0.
+    def loss_and_grad(self, x, dataloader, k_fail=False):
+        Ltot, ntot, nfail_tot = 0., 0., 0
         dLdx = torch.zeros_like(x, requires_grad=False, device=device)
         self.loss_func.raw_loss = 0.
         self.loss_func.individual_loss[:] = 0.
@@ -336,15 +338,16 @@ class AbstractWrapper(ABC, torch.nn.Module):
             res, failed = self(x, *inputs)
             if failed.any():
                 n_fail = failed.count_nonzero()
+                nfail_tot += n_fail.item()
                 ntot -= n_fail.item()
                 last_step = x.detach().clone() - self.last_x
-                with torch.no_grad():
-                    penalty = n_fail * self.SCFfail_penalty[0]
-                    penalty_width = self.SCFfail_penalty[1]
-                    offset = last_step * self.SCFfail_penalty[2]
-                    center = x.detach().clone() + offset
-                    self.loss_func.add_penalty(center, sigma=penalty_width,
-                                               scale=penalty)
+#                with torch.no_grad():
+#                    penalty = n_fail * self.SCFfail_penalty[0]
+#                    penalty_width = self.SCFfail_penalty[1]
+#                    offset = last_step * self.SCFfail_penalty[2]
+#                    center = x.detach().clone() + offset
+#                    self.loss_func.add_penalty(center, sigma=penalty_width,
+#                                               scale=penalty)
             L = self.loss_func(res, refs, x, nAtoms=nAtoms,
                                weights=weights, include=self.include_loss,
                                extensive=self.is_extensive, masking=failed)
@@ -356,6 +359,10 @@ class AbstractWrapper(ABC, torch.nn.Module):
         self.raw_loss = self.loss_func.raw_loss / ntot
         self.individual_loss = self.loss_func.individual_loss / ntot
         Ltot, dLdx = Ltot / ntot, dLdx / ntot
+        if k_fail and (nfail_tot > 0):
+            Lout = 1e3 * nfail_tot + self.raw_loss
+            k_grad = 1e3 * torch.ones_like(dLdx) * nfail_tot + dLdx
+            return Lout, k_grad.detach().numpy()
         return Ltot, dLdx.detach().numpy()
         
     

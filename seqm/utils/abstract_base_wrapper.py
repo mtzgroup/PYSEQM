@@ -58,7 +58,7 @@ class AbstractWrapper(ABC, torch.nn.Module):
             raise ValueError("Requested property/ies not available.")
         self.include_loss = sorted([prop2index[prop] for prop in loss_include])
         self.custom_params = custom_params
-        self.last_x = 0.
+#        self.last_x = 0.
         
     
     @abstractmethod
@@ -144,7 +144,7 @@ class AbstractWrapper(ABC, torch.nn.Module):
         logmsg  = "\n  SEQC OPTIMIZATION BROUGHT TO YOU BY SLOWCODE, INC."
         logmsg += "\n"+"-"*73
         print(logmsg)
-        self.last_x = x.detach().clone()
+#        self.last_x = x.detach().clone()
         for epoch in range(n_epochs):
             if validation_loader is not None:
                 x.requires_grad_(False)
@@ -202,25 +202,32 @@ class AbstractWrapper(ABC, torch.nn.Module):
             weights = [w.to(device) for w in weights]
             self.ntot_tst += inputs[0].shape[0]
             nAtoms = torch.count_nonzero(inputs[0], dim=1)
-            last_step = x.detach().clone() - self.last_x
+#            last_step = x.detach().clone() - self.last_x
             def closure():
                 self.opt.zero_grad()
-                res, fail = self(x, *inputs)
-                if fail.any():
-                    self.ntot_tst -= fail.count_nonzero()
+                res, failed = self(x, *inputs)
+                if failed.any():
+                    mask = torch.where(~failed)
+                    res = [r[mask] for r in res]
+                    my_w = [w[mask] for w in weights]
+                    my_refs = [ref[mask] for ref in refs]
+                    my_nA = nAtoms[mask]
+                    self.ntot_tst -= failed.count_nonzero()
 #                    with torch.no_grad():
-#                        penalty = fail.count_nonzero()*self.SCFfail_penalty[0]
+#                        penalty = failed.count_nonzero()*self.SCFfail_penalty[0]
 #                        penalty_width = self.SCFfail_penalty[1]
 #                        offset = last_step * self.SCFfail_penalty[2]
 #                        center = x.detach().clone() + offset
 #                        self.loss_func.add_penalty(center,sigma=penalty_width,
 #                                                   scale=penalty)
-                loss = self.loss_func(res, refs, x, nAtoms=nAtoms, 
-                            weights=weights, include=self.include_loss,
-                            extensive=self.is_extensive, masking=fail)
-                loss.backward()
+                else:
+                    my_refs, my_w, my_nA = refs, weights, nAtoms
+                loss = self.loss_func(res, my_refs, x, nAtoms=my_nA, 
+                                    weights=my_w, include=self.include_loss,
+                                    extensive=self.is_extensive)
+                x.grad = agrad(loss, x)[0]
                 return loss
-            self.last_x = x.detach().clone()
+#            self.last_x = x.detach().clone()
             L = self.opt.step(closure)
             Ltot += L.item()
         self.ntot_tst = max(self.ntot_tst, 1)
@@ -233,7 +240,7 @@ class AbstractWrapper(ABC, torch.nn.Module):
         self.loss_func.raw_loss = 0.
         self.loss_func.individual_loss[:] = 0.
         def closure():
-            ntot, Ltot = 0., torch.tensor(0., requires_grad=True, device=device)
+            ntot, Ltot = 0., torch.tensor(0., device=device)
             self.opt.zero_grad()
             dLdx = torch.zeros_like(x, requires_grad=False, device=device)
             for (inputs, refs, weights) in dataloader:
@@ -242,12 +249,17 @@ class AbstractWrapper(ABC, torch.nn.Module):
                 weights = [w.to(device) for w in weights]
                 ntot += inputs[0].shape[0]
                 nAtoms = torch.count_nonzero(inputs[0], dim=1)
-                last_step = x.detach().clone() - self.last_x
-                res, fail = self(x, *inputs)
-                if fail.any():
-                    ntot -= fail.count_nonzero()
+#                last_step = x.detach().clone() - self.last_x
+                res, failed = self(x, *inputs)
+                if failed.any():
+                    mask = torch.where(~failed)
+                    res = [r[mask] for r in res]
+                    refs = [ref[mask] for ref in refs]
+                    weights = [w[mask] for w in weights]
+                    nAtoms = nAtoms[mask]
+                    ntot -= failed.count_nonzero()
 #                    with torch.no_grad():
-#                        penalty = fail.count_nonzero()*self.SCFfail_penalty[0]
+#                        penalty = failed.count_nonzero()*self.SCFfail_penalty[0]
 #                        penalty_width = self.SCFfail_penalty[1]
 #                        offset = last_step * self.SCFfail_penalty[2]
 #                        center = x.detach().clone() + offset
@@ -255,7 +267,7 @@ class AbstractWrapper(ABC, torch.nn.Module):
 #                                                   scale=penalty)
                 loss = self.loss_func(res, refs, x, nAtoms=nAtoms,
                             weights=weights, include=self.include_loss,
-                            extensive=self.is_extensive, masking=fail)
+                            extensive=self.is_extensive)
                 dLdx = dLdx + agrad(loss, x)[0]
                 Ltot = Ltot + loss.item()
             ntot = max(ntot, 1)
@@ -265,13 +277,14 @@ class AbstractWrapper(ABC, torch.nn.Module):
 #            Ltot.backward()
             x.grad = dLdx
             return Ltot
-        self.last_x = x.detach().clone()
+#        self.last_x = x.detach().clone()
         L = self.opt.step(closure)
         Lout = L.item()
         return Lout
         
     
     def validate_epoch(self, x, validation_loader):
+        x.requires_grad_(False)
         Lval, nval = 0., 0.
         for (inputs, refs, weights) in validation_loader:
             inputs = [inp.to(device) for inp in inputs]
@@ -280,10 +293,16 @@ class AbstractWrapper(ABC, torch.nn.Module):
             nval += inputs[0].shape[0]
             nAtoms = torch.count_nonzero(inputs[0], dim=1)
             res, failed = self(x, *inputs)
-            nval -= failed.count_nonzero().item()
+            if failed.any():
+                mask = torch.where(~failed)
+                res = [r[mask] for r in res]
+                refs = [ref[mask] for ref in refs]
+                weights = [w[mask] for w in weights]
+                nAtoms = nAtoms[mask]
+                nval -= failed.count_nonzero().item()
             loss = self.loss_func(res, refs, x, nAtoms=nAtoms, 
                             weights=weights, include=self.include_loss,
-                            extensive=self.is_extensive, masking=failed)
+                            extensive=self.is_extensive)
             Lval += loss.item()
         nval = max(nval, 1)
         return Lval / nval
@@ -302,6 +321,11 @@ class AbstractWrapper(ABC, torch.nn.Module):
             nAtoms = torch.count_nonzero(inputs[0], dim=1)
             res, failed = self(x, *inputs)
             if failed.any():
+                mask = torch.where(~failed)
+                res = [r[mask] for r in res]
+                refs = [ref[mask] for ref in refs]
+                weights = [w[mask] for w in weights]
+                nAtoms = nAtoms[mask]
                 n_fail = failed.count_nonzero()
                 nfail_tot += n_fail.item()
                 ntot -= n_fail.item()
@@ -313,7 +337,7 @@ class AbstractWrapper(ABC, torch.nn.Module):
 #                                               scale=penalty)
             L = self.loss_func(res, refs, x, nAtoms=nAtoms,
                                weights=weights, include=self.include_loss,
-                               extensive=self.is_extensive, masking=failed)
+                               extensive=self.is_extensive)
             Ltot += L.item()
         ntot = max(ntot, 1)
         Ltot = Ltot / ntot
@@ -337,10 +361,15 @@ class AbstractWrapper(ABC, torch.nn.Module):
             nAtoms = torch.count_nonzero(inputs[0], dim=1)
             res, failed = self(x, *inputs)
             if failed.any():
+                mask = torch.where(~failed)
+                res = [r[mask] for r in res]
+                refs = [ref[mask] for ref in refs]
+                weights = [w[mask] for w in weights]
+                nAtoms = nAtoms[mask]
                 n_fail = failed.count_nonzero().item()
                 nfail_tot += n_fail
                 ntot -= n_fail
-                last_step = x.detach().clone() - self.last_x
+#                last_step = x.detach().clone() - self.last_x
 #                with torch.no_grad():
 #                    penalty = n_fail * self.SCFfail_penalty[0]
 #                    penalty_width = self.SCFfail_penalty[1]
@@ -350,12 +379,12 @@ class AbstractWrapper(ABC, torch.nn.Module):
 #                                               scale=penalty)
             L = self.loss_func(res, refs, x, nAtoms=nAtoms,
                                weights=weights, include=self.include_loss,
-                               extensive=self.is_extensive, masking=failed)
+                               extensive=self.is_extensive)
             subgrad = agrad(L, x)[0]
             dLdx = dLdx + subgrad
             Ltot = Ltot + L.item()
         if nfail_tot > 0: print(nfail_tot," molecules not converged.")
-        self.last_x = x.detach().clone()
+#        self.last_x = x.detach().clone()
         ntot = max(ntot, 1)
         self.raw_loss = self.loss_func.raw_loss / ntot
         self.individual_loss = self.loss_func.individual_loss / ntot

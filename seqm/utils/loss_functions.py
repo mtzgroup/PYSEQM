@@ -38,12 +38,9 @@ class RSSperAtom(torch.nn.Module):
         self.reg = regularizer
     
     def forward(self, predictions, references, x=None, nAtoms=[], weights=[], 
-                extensive=[], include=[], masking=None):
+                extensive=[], include=[]):
         if x is None: x = torch.tensor(0., requires_grad=False)
-        if masking is None:
-            masking = torch.tensor([False,]*predictions[0].shape[0])
-        loss_mask = torch.where(masking, 0., 1.)
-        loss = torch.tensor(0., requires_grad=True)
+        loss = torch.tensor(0.)
         for i in include:
             delta2 = torch.square(predictions[i] - references[i])
             if delta2.dim() > 2:
@@ -51,11 +48,10 @@ class RSSperAtom(torch.nn.Module):
                 delta2_w = weights[i] * delta2.sum(dim=sumaxes)
             else:
                 delta2_w = weights[i] * delta2
-            masked_delta2_w = loss_mask * delta2_w
             if extensive[i]:
-                my_RSS = (masked_delta2_w / nAtoms).sum()
+                my_RSS = (delta2_w / nAtoms).sum()
             else:
-                my_RSS = masked_delta2_w.sum()
+                my_RSS = delta2_w.sum()
             self.individual_loss[i] += my_RSS.item()
             loss = loss + my_RSS
         self.raw_loss += loss.item()

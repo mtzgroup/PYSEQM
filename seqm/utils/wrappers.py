@@ -122,19 +122,20 @@ class SEQM_multirun(torch.nn.Module):
 class AMASE_singlepoint(torch.nn.Module):
     def __init__(self, reference_Z, reference_desc, reference_coordinates=None,
                  seqm_settings={}, custom_params=None, mode="full",
-                 custom_reference=False):
+                 custom_reference=False, expK=1):
         super(AMASE_singlepoint, self).__init__()
         Z_ref = prepare_array(reference_Z, "atomic numbers")
+        self.expK = expK
         self.core_runner = AMASE_singlepoint_core(Z_ref, reference_desc,
                 reference_coordinates=reference_coordinates,
                 seqm_settings=seqm_settings, custom_params=custom_params,
                 mode=mode, custom_reference=custom_reference)
     
-    def forward(self, Alpha, Z, positions, desc, reference_params=None, expK=1):
+    def forward(self, Alpha, Z, positions, desc, reference_params=None):
         orderer = Orderator(Z, positions)
         species, xyz = orderer.prepare_input()
         xyz.requires_grad_(True)
-        res, failed = self.core_runner(Alpha, species, xyz, desc, expK=expK,
+        res, failed = self.core_runner(Alpha, species, xyz, desc, expK=self.expK,
                                reference_params=reference_params)
         self.results = self.core_runner.results
         return res, failed
@@ -298,7 +299,7 @@ class AMASE_trainer(AbstractWrapper):
     kernel-predicted parameters.
     """
     def __init__(self, reference_Z, reference_desc, reference_coordinates=None,
-                 custom_params=None, seqm_settings=None, mode="full",
+                 custom_params=None, seqm_settings=None, mode="full", expK=1,
                  elements=[], use_custom_reference=False, loss_include=[],
                  loss_type="RSSperAtom", loss_args=(), loss_kwargs={},
                  SCFfail_penalty=[1e2,1e-3,1e-5]):
@@ -312,6 +313,7 @@ class AMASE_trainer(AbstractWrapper):
         if isinstance(reference_desc, list):
             with torch.no_grad():
                 reference_desc = pad_sequence(reference_desc, batch_first=True)
+        self.expK = expK
         reference_Z = reference_Z.to(device)
         reference_desc = reference_desc.to(device)
         self.core_runner = AMASE_singlepoint_core(reference_Z, reference_desc,
@@ -320,9 +322,9 @@ class AMASE_trainer(AbstractWrapper):
                                  use_custom_reference=use_custom_reference,
                                  seqm_settings=seqm_settings, mode=mode)
 
-    def forward(self, A, species, coordinates, desc, expK=1, custom_reference=None):
-        res, failed = self.core_runner(A, species, coordinates, desc, expK=expK,
-                               custom_reference=custom_reference)
+    def forward(self, A, species, coordinates, desc, custom_reference=None):
+        res, failed = self.core_runner(A, species, coordinates, desc, 
+                            expK=self.expK, custom_reference=custom_reference)
         self.results = self.core_runner.results
         return res, failed
 

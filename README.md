@@ -17,7 +17,7 @@ This is a locally-modified development version of [PYSEQM](https://github.com/la
 * THIS VERSION: kernel-predicted SEQC parameters incl. training routines (alpha)
 
 * **TODO**:
-  - Loss of training routines shows constant scaling with batch size during batched training (but correct minimum)
+  - inspect memory spike and potential memory leak when SCF fails
   - GPU support for training functioning, but non-beneficial for kernel learning (likely due to small model size)
   - enable parallel training (DistributedDataParallel modules, alternative solution for CPU mode)
 

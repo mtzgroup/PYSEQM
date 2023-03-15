@@ -35,6 +35,7 @@ class RSSperAtom(torch.nn.Module):
         self.penalties = []
         self.raw_loss = 0.
         self.individual_loss = torch.tensor([0.,]*n_implemented_properties)
+        self.individual_per_mol = [[],]*n_implemented_properties
         self.reg = regularizer
     
     def forward(self, predictions, references, x=None, nAtoms=[], weights=[], 
@@ -49,11 +50,13 @@ class RSSperAtom(torch.nn.Module):
             else:
                 delta2_w = weights[i] * delta2
             if extensive[i]:
-                my_RSS = (delta2_w / nAtoms).sum()
+                my_RSS = (delta2_w / nAtoms)
             else:
-                my_RSS = delta2_w.sum()
-            self.individual_loss[i] += my_RSS.item()
-            loss = loss + my_RSS
+                my_RSS = delta2_w
+            self.individual_per_mol[i].extend(my_RSS.tolist())
+            RSS_sum = my_RSS.sum()
+            self.individual_loss[i] += RSS_sum.item()
+            loss = loss + RSS_sum
         self.raw_loss += loss.item()
         for pen in self.penalties: loss = loss + pen(x)
         loss = loss + self.reg * torch.square(x).sum()

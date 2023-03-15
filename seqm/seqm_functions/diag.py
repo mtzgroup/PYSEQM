@@ -238,6 +238,8 @@ class degen_symeig(torch.autograd.Function):
     @staticmethod
     def forward(ctx, A, UPLO='U'):
         eival, eivec = torch.linalg.eigh(A)
+        # IS THIS CAUSING MEMORY TO EXPLODE IN DIRECT BACKPROP?
+        # DOUBLE-CHECK USING THIS SOLVER IN IMPLICIT ALGODIFF!
         ctx.save_for_backward(eival, eivec)
         return eival, eivec
     

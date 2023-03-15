@@ -551,6 +551,7 @@ class SCF(torch.autograd.Function):
                            nmol, molsize, \
                            maskd, mask, idxi, idxj, P, eps, sp2=SCF.sp2)
         eps = torch.as_tensor(eps, dtype=M.dtype, device=M.device)
+        ## IS THIS CAUSING MEMORY SPIKES????
         ctx.save_for_backward(P, M, w, gss, gpp, gsp, gp2, hsp, \
                               nHydro, nHeavy, nOccMO, \
                               maskd, mask, idxi, idxj, eps, notconverged, \
@@ -594,6 +595,7 @@ class SCF(torch.autograd.Function):
         gradients=[(grad0,)]
         while(1):
             grad0_max_prev = gradients[-1][0].abs().max(dim=-1)[0].max(dim=-1)[0]
+            ## IS THIS CAUSING MEMORY SPIKES????
             gradients.append(grad(Pout, gv, grad_outputs=gradients[-1][0], create_graph=True, retain_graph=True))
 
 

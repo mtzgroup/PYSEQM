@@ -4,7 +4,6 @@ from warnings import warn
 from torch.nn.utils.rnn import pad_sequence
 from inspect import getfullargspec
 from scipy.optimize import approx_fprime, LinearConstraint, Bounds
-from ase.data import atomic_numbers
 from ..basics import Energy
 from ..seqm_functions.parameters import params
 
@@ -131,7 +130,8 @@ def prepare_array(x, label):
             x_proc = torch.tensor([x])
         else:
             x_proc = x
-    elif type(x) == list:
+    elif isinstance(x, (list, np.ndarray)):
+        if isinstance(x, np.ndarray): x = x.tolist()
         x0 = x[0] if torch.is_tensor(x[0]) else torch.tensor(x[0])
         dim_individual = x0.dim()
         if dim_individual == 0:
@@ -151,6 +151,15 @@ def prepare_array(x, label):
                 x_proc = pad_sequence(tensor_list, batch_first=True)
         else:
             raise ValueError("Unrecognized input for "+label+".")
+    elif isinstance(x, (int, float)):
+        convmsg  = label + " given as scalar/integer. "
+        convmsg += "Converting to tensor(["+label+"]) with shape "
+        convmsg += "(1,) for consistency.\n"
+        convmsg += "You probably intended to run a single molecule and "
+        convmsg += "if so, this will give the correct behavior. "
+        convmsg += "If not, please check you input!"
+        warn(convmsg)
+        x_proc = torch.tensor([x])
     else:
         raise ValueError("Unrecognized input for "+label+".")
     return x_proc
@@ -208,7 +217,7 @@ class Orderator:
         rest = []
         if isinstance(axis, int): axis = [axis,]*len(args)
         for i, arg in enumerate(args):
-            if not torch.is_tensor(arg): arg = prepare_array(arg)
+            if not torch.is_tensor(arg): arg = prepare_array(arg, "extra")
             arg_s = tensorsort_nD(arg, self.sortidx, axis=axis[i])
             rest.append(arg_s)
         return Z, xyz, *rest
@@ -254,44 +263,6 @@ def get_energy_calculator(species, coordinates, custom_parameters=(), **kwargs):
     seqm_settings.update(kwargs)
     calc = Energy(seqm_settings)
     return calc
-    
-
-def prepare_array(x, label):
-    if torch.is_tensor(x):
-        if x[0].dim() == 0:
-            convmsg  = label + " given as 1D array, shape (nAtoms,). "
-            convmsg += "Converting to tensor(["+label+"]) with shape "
-            convmsg += "(1,nAtoms) for consistency.\n"
-            convmsg += "You probably intended to run a single molecule and "
-            convmsg += "if so, this will give the correct behavior. "
-            convmsg += "If not, please check your input!"
-            warn(convmsg)
-            x_proc = torch.tensor([x])
-        else:
-            x_proc = x
-    elif type(x) == list:
-        x0 = x[0] if torch.is_tensor(x[0]) else torch.tensor(x[0])
-        dim_individual = x0.dim()
-        if dim_individual == 0:
-            convmsg  = label + " given as 1D array, shape (nAtoms,). "
-            convmsg += "Converting to tensor(["+label+"]) with shape "
-            convmsg += "(1,nAtoms) for consistency.\n"
-            convmsg += "You probably intended to run a single molecule and "
-            convmsg += "if so, this will give the correct behavior. "
-            convmsg += "If not, please check your input!"
-            warn(convmsg)
-            x_proc = torch.tensor([x])
-        elif dim_individual in [1,2]:
-            if torch.is_tensor(x[0]):
-                x_proc = pad_sequence(x, batch_first=True)
-            else:
-                tensor_list = [torch.tensor(y) for y in x]
-                x_proc = pad_sequence(tensor_list, batch_first=True)
-        else:
-            raise ValueError("Unrecognized input for "+label+".")
-    else:
-        raise ValueError("Unrecognized input for "+label+".")
-    return x_proc
     
 
 def get_default_parameters(species, method, parameter_dir, param_list):

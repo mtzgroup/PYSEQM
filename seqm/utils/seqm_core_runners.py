@@ -151,14 +151,17 @@ class SEQM_singlepoint_core(torch.nn.Module):
         self.settings['eig'] = True
         coordinates.requires_grad_(True)
         calc = Energy(self.settings).to(device)
-        try:
-            res = calc(self.const, coordinates, species, learnedpar, 
+#        try:
+        res = calc(self.const, coordinates, species, learnedpar, 
                        all_terms=True)
-        except:# (RuntimeError, torch._C._LinAlgError):
+#        except:# (RuntimeError, torch._C._LinAlgError):
 #            p.register_hook(lambda grad: grad * 0.)
 #            coordinates.register_hook(lambda grad: grad * 0.)
-            res = [LFAIL, LFAIL, LFAIL*torch.ones_like(coordinates), LFAIL]
-            return res, torch.tensor([True,]*species.shape[0])
+#            nMols = species.shape[0]
+#            fres1 = LFAIL * torch.ones(nMols)
+#            fres2 = LFAIL * torch.ones_like(coordinates)
+#            res = [fres1, fres1, fres2, fres1]
+#            return res, torch.tensor([True,]*nMols)
         masking = torch.where(res[-1], LFAIL, 1.)
         # atomization and total energy
         Eat_fin = res[0] * masking

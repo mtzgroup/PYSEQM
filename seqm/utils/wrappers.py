@@ -14,7 +14,7 @@ from itertools import chain
 from ..basics import Energy, Parser
 from ..seqm_functions.constants import Constants
 from .pyseqm_helpers import prepare_array, Orderator, get_default_parameters
-from .abstract_base_wrapper import AbstractWrapper
+from .abstract_base_wrapper import ABW
 from .kernels import ParameterKernel
 from .seqm_core_runners import SEQM_singlepoint_core, SEQM_multirun_core
 from .kernel_core_runners import AMASE_singlepoint_core, AMASE_multirun_core
@@ -177,7 +177,7 @@ class AMASE_multirun(torch.nn.Module):
 
 
 
-class elementwiseSEQM_trainer(AbstractWrapper):
+class elementwiseSEQM_trainer(ABW):
     """
     Concrete wrapper for SEQC calculations with elementwise parameters.
     
@@ -239,7 +239,7 @@ class elementwiseSEQM_trainer(AbstractWrapper):
         return self.results[property_name]
         
     
-class SEQM_trainer(AbstractWrapper):
+class SEQM_trainer(ABW):
     """
     Concrete wrapper for SEQC calculations with atomwise parameters.
     
@@ -293,7 +293,7 @@ class SEQM_trainer(AbstractWrapper):
         return self.results[property_name]
         
     
-class AMASE_trainer(AbstractWrapper):
+class AMASE_trainer(ABW):
     """
     Concrete loss module to optimize regression vector for SEQC with
     kernel-predicted parameters.

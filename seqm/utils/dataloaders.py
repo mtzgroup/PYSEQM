@@ -10,28 +10,42 @@ import torch
 from abc import ABC, abstractmethod
 from torch.utils.data import Dataset, DataLoader
 from torch.nn.utils.rnn import pad_sequence
+from .pyseqm_helpers import prepare_array
 
 
-class AbstractLoader(ABC, Dataset):
+inp2int = {"species":"species",
+           "coordinates":"coordinates",
+           "atomization_ref":"Eat_ref",
+           "atomization_weight":"Eat_weight",
+           "energy_ref":"Etot_ref",
+           "energy_weight":"Etot_weight",
+           "forces_ref":"F_ref",
+           "forces_weight":"F_weight",
+           "gap_ref":"gap_ref",
+           "gap_weight":"gap_weight",
+          }
+base_inps = [k for k in inp2int.keys()]
+pad_inps = ["coordinates","forces_ref"]
+
+class AbstractLoader(Dataset, ABC):
     def __init__(self, species, coordinates, atomization_ref=None, 
                  atomization_weight=1., energy_ref=None, energy_weight=1.,
                  forces_ref=None, forces_weight=1., gap_ref=None,
                  gap_weight=1.):
         super(AbstractLoader, self).__init__()
-        self.species = pad_sequence(species, batch_first=True)
-        self.species.requires_grad_(False)
+        for inp in base_inps:
+            inp_obj = eval(inp)
+            int_nam = inp2int[inp]
+            if not torch.is_tensor(inp_obj):
+                if inp in pad_inps or (isinstance(inp_obj, list) and torch.is_tensor(inp_obj[0])):
+                    exec("self."+int_nam+" = pad_sequence("+inp+", batch_first=True)")
+                    exec("self."+int_nam+".requires_grad_(False)")
+                else:
+                    exec("self."+int_nam+" = torch.tensor("+inp+", requires_grad=False)")
+            else:
+                exec("self."+int_nam+" = "+inp)
+                exec("self."+int_nam+".requires_grad_(False)")
         self.nMols = self.species.shape[0]
-        self.coordinates = pad_sequence(coordinates, batch_first=True)
-        self.coordinates.requires_grad_(False)
-        self.Eat_ref = torch.tensor(atomization_ref, requires_grad=False)
-        self.Etot_ref = torch.tensor(energy_ref, requires_grad=False)
-        self.F_ref = pad_sequence(forces_ref, batch_first=True)
-        self.F_ref.requires_grad_(False)
-        self.gap_ref = torch.tensor(gap_ref, requires_grad=False)
-        self.Eat_weight = torch.tensor(atomization_weight, requires_grad=False)
-        self.Etot_weight = torch.tensor(energy_weight, requires_grad=False)
-        self.F_weight = torch.tensor(forces_weight, requires_grad=False)
-        self.gap_weight = torch.tensor(gap_weight, requires_grad=False)
 
     def __len__(self): return self.nMols
 
@@ -80,7 +94,8 @@ class AMASE_data(AbstractLoader):
                         energy_ref=energy_ref, energy_weight=energy_weight,
                         forces_ref=forces_ref, forces_weight=forces_weight,
                         gap_ref=gap_ref, gap_weight=gap_weight)
-        self.desc = pad_sequence(desc, batch_first=True)
+        if not torch.is_tensor(desc) or (isinstance(desc, list) and torch.is_tensor(desc[0])):
+            self.desc = pad_sequence(desc, batch_first=True)
         self.desc.requires_grad_(False)
         
     def __getitem__(self, idx):

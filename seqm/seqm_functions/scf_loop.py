@@ -10,7 +10,7 @@ import warnings
 import time
 #from .check import check
 #scf_backward==0: ignore the gradient on density matrix
-#scf_backward==1: use recursive formu
+#scf_backward==1: use recursive formula
 #scf_backward==2: go backward scf loop directly
 
 
@@ -523,7 +523,7 @@ class SCF(torch.autograd.Function):
     sp2=[False]
     converger=[2]
     scf_backward_eps = 1.0e-2
-    def __init__(self, scf_converger=[2], use_sp2=[False], scf_backward_eps = 1.0e-2):
+    def __init__(self, scf_converger=[2], use_sp2=[False], scf_backward_eps=1.0e-2):
         SCF.sp2 = use_sp2
         SCF.converger = scf_converger
         SCF.scf_backward_eps = scf_backward_eps
@@ -673,7 +673,7 @@ class SCF(torch.autograd.Function):
 class SCF0(SCF):
     @staticmethod
     def backward(ctx, grad0, grad1):
-        #igonre the gradient on density matrix
+        #ignore the gradient on density matrix
         return None, None, None, None, None, None, None, \
                None, None, None, \
                None, None, \

@@ -30,9 +30,9 @@ class NoScheduler:
     def step(self, metrics=0.): pass
 
 
-class AbstractWrapper(ABC, torch.nn.Module):
+class ABW(torch.nn.Module, ABC):
     """
-    Abstract base class for loss modules.
+    Abstract base class for wrappers.
     Implements common features such as basic initialization, loss evaluation,
     adding loss properties, and minimization.
     
@@ -43,7 +43,7 @@ class AbstractWrapper(ABC, torch.nn.Module):
                  SCFfail_penalty=[1e2,1e-5,1e-6], loss_type="RSSperAtom",
                  loss_args=(), loss_kwargs={}):
         ## initialize parent modules and attributes
-        super(AbstractWrapper, self).__init__()
+        super(ABW, self).__init__()
         self.implemented_properties = ['atomization','energy','forces','gap']
         self.n_impl = len(self.implemented_properties)
         self.is_extensive = [True, True, True, False]
@@ -70,7 +70,7 @@ class AbstractWrapper(ABC, torch.nn.Module):
         pass
         
     
-    def train(self, x, dataloader, n_epochs=4, include=[], optimizer="Adam",
+    def train(self, x, dataloader, n_epochs=4, include=None, optimizer="Adam",
               opt_kwargs={}, opt_mode="stochastic", n_up_thresh=5, up_thresh=1e-4,
               loss_conv=1e-8, loss_step_conv=1e-8, scheduler=None, scheduler_kwargs={},
               validation_loader=None, SCFfail_penalty=[1e2,1e-5,1e-6]):
@@ -139,7 +139,8 @@ class AbstractWrapper(ABC, torch.nn.Module):
         self.SCFfail_penalty = SCFfail_penalty
         if any(prop not in self.implemented_properties for prop in include):
             raise ValueError("Requested property/ies not available.")
-        self.include_loss = sorted([prop2index[prop] for prop in include])
+        if include is not None:
+            self.include_loss = sorted([prop2index[prop] for prop in include])
         Lbak, n_up, self.minimize_log = torch.inf, 0, []
         logmsg  = "\n  SEQC OPTIMIZATION BROUGHT TO YOU BY SLOWCODE, INC."
         logmsg += "\n"+"-"*73
@@ -383,8 +384,7 @@ class AbstractWrapper(ABC, torch.nn.Module):
             L = self.loss_func(res, refs, x, nAtoms=nAtoms,
                                weights=weights, include=self.include_loss,
                                extensive=self.is_extensive)
-            subgrad = agrad(L, x)[0]
-            dLdx = dLdx + subgrad
+            dLdx = dLdx + agrad(L, x)[0]
             Ltot = Ltot + L.item()
         if nfail_tot > 0: print(nfail_tot," molecules not converged.")
 #        self.last_x = x.detach().clone()

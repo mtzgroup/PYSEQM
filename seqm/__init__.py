@@ -1,1 +1,1 @@
-from . import seqm_functions, basics, MolecularDynamics, XLBOMD
+from . import seqm_functions, basics, Molecule, MolecularDynamics, ElectronicStructure

@@ -11,6 +11,7 @@ seqm.seqm_functions.scf_loop.debug = True
 seqm.seqm_functions.scf_loop.SCF_BACKWARD_MAX_ITER = 1000
 seqm.seqm_functions.scf_loop.RAISE_ERROR_IF_SCF_BACKWARD_FAILS = False
 seqm.seqm_functions.MAX_ITER_TO_STOP_IF_SCF_BACKWARD_DIVERGE = 90
+seqm.seqm_functions.DEGEN_EIGENSOLVER = True
 
 #check code to produce energy terms for each molecule
 # with a 'learned' given parameters
@@ -26,11 +27,11 @@ N = 100
 
 #"""
 #pertubation direction
-dir1 = torch.randn(3).to(device)
+dir1 = torch.tensor([0.,0.,1.])#torch.randn(3).to(device)
 dir1 /= torch.norm(dir1)
 
 #force direction
-dir2 = torch.randn(3).to(device)
+dir2 = torch.tensor([0.,0.,1.])#torch.randn(3).to(device)
 dir2 /= torch.norm(dir2)
 
 #dir2 = dir2 - (dir2*dir1).sum()*dir1
@@ -66,15 +67,11 @@ coordinates = coordinates_op.expand(N,4,3).clone()
 coordinates[...,0,:] += dx.unsqueeze(1)*dir1.unsqueeze(0)
 
 
-
-
-
-
 elements = [0]+sorted(set(species.reshape(-1).tolist()))
 seqm_parameters = {
                    'method' : 'AM1',  # AM1, MNDO, PM#
                    'scf_eps' : 1.0e-7,  # unit eV, change of electric energy, as nuclear energy doesnt' change during SCF
-                   'scf_converger' : [1,0.0], # converger used for scf loop
+                   'scf_converger' : [0,0.2], # converger used for scf loop
                                          # [0, 0.1], [0, alpha] constant mixing, P = alpha*P + (1.0-alpha)*Pnew
                                          # [1], adaptive mixing
                                          # [2], adaptive mixing, then pulay
@@ -82,7 +79,7 @@ seqm_parameters = {
                                             #[True, eps] or [False], eps for SP2 conve criteria
                    'elements' : elements, #[0,1,6,8],
                    'learned' : [], # learned parameters name list, e.g ['U_ss']
-                   #'parameter_file_dir' : '../../seqm/params/', # file directory for other required parameters
+                   'parameter_file_dir' : '../../seqm/params/', # file directory for other required parameters
                    'pair_outer_cutoff' : 1.0e10, # consistent with the unit on coordinates
                    'eig' : True,
                    'scf_backward': 2, #scf_backward==0: ignore the gradient on density matrix
@@ -92,20 +89,22 @@ seqm_parameters = {
                    }
 
 coordinates.requires_grad_(True)
-eng = Energy(seqm_parameters).to(device)
-Hf, Etot, Eelec, Enuc, Eiso, EnucAB, e, P, charge, notconverged = eng(const, coordinates, species, learned_parameters=dict(), all_terms=True)
-#fy =  dE/dy
-force, = torch.autograd.grad(Etot.sum(),coordinates, create_graph=True)
-
-Fdir2 = (force[:,0,:]*dir2.unsqueeze(0)).sum(dim=1)
-Fdir2.sum().backward()
-#
-dFdir2_ddir1 = (coordinates.grad[:,0,:]*dir1.unsqueeze(0)).sum(dim=1)
-
-
+with torch.autograd.set_detect_anomaly(True):
+    eng = Energy(seqm_parameters).to(device)
+    Hf, Etot, Eelec, Enuc, Eiso, EnucAB, e, P, charge, notconverged = eng(const, coordinates, species, learned_parameters=dict(), all_terms=True)
+    #fy =  dE/dy
+    force = -torch.autograd.grad(Etot.sum(), coordinates, create_graph=True)[0]
+    
+    Fdir2 = force[:,0,2]#*dir2.unsqueeze(0)).sum(dim=1)
+    #Fdir2.sum().backward()
+    #
+    dFdd = torch.autograd.grad(Fdir2.sum(), coordinates)[0]
+    dFdir2_ddir1 = dFdd[:,0,2]#*dir1.unsqueeze(0)).sum(dim=1)
+    #(coordinates.grad[:,0,:]*dir1.unsqueeze(0)).sum(dim=1)
+    
 
 f=open('log.dat', 'w')
-f.write("#index, dx (Angstrom), Fdir2 (eV/Angstrom), dFdir2_ddir1\n")
+f.write("#index, dx (Angstrom), Fdir2 (eV/Angstrom), dFdir2_ddir1, Etot, force\n")
 for i in range(N):
-    f.write("%d %12.8e %12.8e %12.8e\n" % (i,dx[i],Fdir2[i], dFdir2_ddir1[i] ))
+    f.write("%d %12.8e %12.8e %12.8e %12.8e\n" % (i,dx[i],Fdir2[i], dFdir2_ddir1[i], Etot[i] ))
 f.close()

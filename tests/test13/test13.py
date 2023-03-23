@@ -73,7 +73,7 @@ seqm_parameters = {
                    'parameter_file_dir' : here+'/../../seqm/params/', # file directory for other required parameters
                    'pair_outer_cutoff' : 1.0e10, # consistent with the unit on coordinates
                    'eig' : True,
-                   'scf_backward': 2, #scf_backward==0: ignore the gradient on density matrix
+                   'scf_backward': 1, #scf_backward==0: ignore the gradient on density matrix
                                       #scf_backward==1: use recursive formula
                                       #scf_backward==2: go backward scf loop directly
                    'scf_backward_eps' : 1.0e-3,

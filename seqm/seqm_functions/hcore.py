@@ -3,7 +3,8 @@ from .diat_overlap import diatom_overlap_matrix
 from .two_elec_two_center_int import two_elec_two_center_int as TETCI
 from .constants import overlap_cutoff
 
-def hcore(const,nmol, molsize, maskd, mask, idxi, idxj, ni,nj,xij,rij, Z, zetas, zetap, uss, upp , gss, gpp, gp2, hsp,beta, Kbeta=None):
+def hcore(const,nmol,molsize, maskd, mask, idxi,idxj, ni,nj,xij,rij,
+            Z, zetas,zetap, uss,upp,gss,gpp,gp2,hsp,beta, Kbeta=None):
     """
     Get Hcore and two electron and two center integrals
     """
@@ -56,6 +57,7 @@ def hcore(const,nmol, molsize, maskd, mask, idxi, idxj, ni,nj,xij,rij, Z, zetas,
     overlap_pairs = rij<=overlap_cutoff
     #di=th.zeros((npairs,4,4),dtype=dtype, device=device)
     di = torch.zeros((xij.shape[0], 4, 4),dtype=dtype, device=device)
+    di_my = torch.zeros((nmol*molsize*molsize, 4, 4),dtype=dtype, device=device)
     di[overlap_pairs] = diatom_overlap_matrix(ni[overlap_pairs],
                                nj[overlap_pairs],
                                xij[overlap_pairs],
@@ -63,7 +65,7 @@ def hcore(const,nmol, molsize, maskd, mask, idxi, idxj, ni,nj,xij,rij, Z, zetas,
                                zeta[idxi][overlap_pairs],
                                zeta[idxj][overlap_pairs],
                                qn_int)
-    #di shape (npairs,4,4)
+
     w, e1b, e2a = TETCI(const, idxi, idxj, ni, nj, xij, rij, Z, zetas, zetap, gss, gpp, gp2, hsp)
     #w shape (napirs, 10,10)
     #e1b, e2a shape (npairs, 10)

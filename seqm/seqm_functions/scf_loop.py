@@ -116,7 +116,7 @@ def scf_forward0_u(M, w, gss, gpp, gsp, gp2, hsp, \
                                 nOccMO[notconverged])
                 P_ab[notconverged] /= 2
             elif sp2[0]:
-                Pnew[notconverged] = unpack(
+                P_ab[notconverged] = unpack(
                                             SP2(
                                                 pack(F[notconverged], nHeavy[notconverged], nHydro[notconverged]),
                                                 nOccMO[notconverged], sp2[1]

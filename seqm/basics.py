@@ -65,14 +65,14 @@ class Parser(torch.nn.Module):
         Z = molecule.species.reshape(-1)[real_atoms]
         nHeavy = torch.sum(molecule.species>1,dim=1)
         nHydro = torch.sum(molecule.species==1,dim=1)
-        tore=molecule.const.tore
+        tore = molecule.const.tore
         n_charge = torch.sum(tore[molecule.species],dim=1).reshape(-1).type(torch.int64)
         if torch.is_tensor(molecule.tot_charge):
             n_charge -= molecule.tot_charge.reshape(-1).type(torch.int64)
         
         if self.uhf:
-            nocc_alpha = n_charge/2 + (molecule.mult-1)/2
-            nocc_beta = n_charge/2 - (molecule.mult-1)/2
+            nocc_alpha = n_charge/2. + (molecule.mult-1)/2.
+            nocc_beta = n_charge/2. - (molecule.mult-1)/2.
             if (nocc_alpha%1 != 0).any() or (nocc_beta%1 != 0).any():
                 raise ValueError("Invalid charge/multiplicity combination!")
             nocc = torch.stack((nocc_alpha,nocc_beta), dim=1)

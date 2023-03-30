@@ -291,7 +291,7 @@ class Hamiltonian(torch.nn.Module):
         xij : unit vector for each pair, from i to j, (Rj-Ri)/|Rj-Ri|
         rij : distance for each pair, in atomic unit, shape (n_pairs,)
         Z: atom number, shape (n_atoms,)
-        zetas/zetap : Zeta for s/p orbital for each atom, shape (n_atoms, )
+        zeta_s/zeta_p : Zeta for s/p orbital for each atom, shape (n_atoms, )
         uss, upp, gss, gsp, gpp, gp2, hsp: parameters for AM1/PM3/MNDO, shape (n_atoms,)
         #
         return F, e, P, Hcore

@@ -7,11 +7,11 @@ from .energy import elec_energy
 from .SP2 import SP2
 from .fermi_q import Fermi_Q
 from .G_XL_LR import G
-from seqm.seqm_functions.canon_dm_prt import Canon_DM_PRT
-from seqm.basics import Pack_Parameters
+from .canon_dm_prt import Canon_DM_PRT
+from ..basics import Pack_Parameters
 
 from .pack import *
-from .diag import sym_eig_trunc, sym_eig_trunc1, pseudo_diag
+from .diag import DEGEN_EIGENSOLVER, degen_symeig, pytorch_symeig#sym_eig_trunc, sym_eig_trunc1, pseudo_diag
 import warnings
 import time
 
@@ -20,6 +20,7 @@ CHECK_DEGENERACY = False
 
 
 def make_dm_guess(molecule, seqm_parameters, mix_homo_lumo=False, mix_coeff=0.4, learned_parameters=dict(), overwrite_existing_dm=False):
+    sym_eigh = degen_symeig.apply if DEGEN_EIGENSOLVER else pytorch_symeig
     
     packpar = Pack_Parameters(seqm_parameters).to(molecule.coordinates.device)
     
@@ -110,18 +111,17 @@ def make_dm_guess(molecule, seqm_parameters, mix_homo_lumo=False, mix_coeff=0.4,
             for i in range(nmol):
                 if cond[i]:
                     x0[i,ind[norb[i]:], ind[norb[i]:]] = mutipler[:pnorb[i]]*dE[i]+hN[i]
-            try:
-                e0,v = torch.symeig(x0,eigenvectors=True,upper=True)
-            except:
-                if torch.isnan(x0).any():
-                    print(x0)
+#            try:
+            e0, v = sym_eigh(x0)
+#            except:
+#                if torch.isnan(x0).any():
+#                    print(x0)
                 #print(x0.detach().data.numpy())
-                e0,v = torch.symeig(x0,eigenvectors=True,upper=True)
+#                e0,v = torch.symeig(x0,eigenvectors=True,upper=True)
             e = torch.zeros((nmol, x.shape[-1]),dtype=dtype,device=device)
             e[...,:size] = e0
             for i in range(nmol):
-                if cond[i]:
-                    e[i,norb[i]:size] = 0.0
+                if cond[i]: e[i,norb[i]:size] = 0.0
 
             
             # $$$ the code below can and SHOULD be optimized. Too many reshapes

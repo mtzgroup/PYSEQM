@@ -604,90 +604,93 @@ class SCF(torch.autograd.Function):
     
     
     @staticmethod
-    def backward(ctx, grad0, grad1):
+    def backward(ctx, grad_P, grad1):
         #use recursive formula
-        Pin, M, w, gss, gpp, gsp, gp2, hsp, \
-        nHydro, nHeavy, nOccMO, \
-        maskd, mask, idxi, idxj, eps, notconverged, \
-        atom_molid, pair_molid = ctx.saved_tensors
-        nmol = Pin.shape[0]
-        molsize = Pin.shape[1]//4
-        grads = {}
-        gv = [Pin]
-        gvind = []
-        for i, st in enumerate([M, w, gss, gpp, gsp, gp2, hsp]):
-            if st.requires_grad:
-                gv.append(st)
-                gvind.append(i+1)
-                grads[i+1] = torch.zeros_like(st)
-            else:
-                grads[i+1] = None
-        with torch.enable_grad():
-            Pin.requires_grad_(True)
+        return recursive_back(grad_P, ctx.saved_tensors)
+
+
+
+def recursive_back(grad_out, inputs):
+    Pin, M, w, gss, gpp, gsp, gp2, hsp, \
+    nHydro, nHeavy, nOccMO, \
+    maskd, mask, idxi, idxj, eps, notconverged, \
+    atom_molid, pair_molid = inputs
+    nmol = Pin.shape[0]
+    molsize = Pin.shape[-1]//4
+    grads, gv, gvind = {}, [Pin], []
+    for i, st in enumerate([M, w, gss, gpp, gsp, gp2, hsp]):
+        if st.requires_grad:
+            gv.append(st)
+            gvind.append(i+1)
+        else:
+            grads[i+1] = None
+    with torch.enable_grad():
+        Pin.requires_grad_(True)
+        if Pin.dim() == 4:
+            F = fock_u_batch(nmol, molsize, Pin, M, maskd, mask, idxi, idxj, w, gss, gpp, gsp, gp2, hsp)
+            Pout = sym_eig_trunc1(F, nHeavy, nHydro, nOccMO)[1] / 2
+        else:
             F = fock(nmol, molsize, Pin, M, maskd, mask, idxi, idxj, w, gss, gpp, gsp, gp2, hsp)
             Pout = sym_eig_trunc1(F, nHeavy, nHydro, nOccMO)[1]
-        k = 0
-        backward_eps = SCF.scf_backward_eps.to(Pin.device)
-        converged = ~notconverged.detach() # scf forward converged
-        diverged = None # scf backward diverged
-        gradients = [(grad0,)]
-        while(1):
-            grad0_max_prev = gradients[-1][0].abs().max(dim=-1)[0].max(dim=-1)[0]
-            gradients.append(grad(Pout, gv, grad_outputs=gradients[-1][0], create_graph=True))
-            grad0_max =  gradients[-1][0].abs().max(dim=-1)[0].max(dim=-1)[0]
-            if converged.any():
-                err = torch.max(grad0_max[converged])
-            else:
-                err = torch.tensor(0.0, device=grad0.device)
-            if debug:
-                t = grad0_max[converged]>backward_eps
-                print('backward scf: ', k, err.item(), t.sum().item())
-            k += 1
+    backward_eps = SCF.scf_backward_eps.to(Pin.device)
+    converged = ~notconverged.detach() # scf forward converged
+    diverged = None # scf backward diverged
+    gradients = [(grad_out,)]
+    for k in range(SCF_BACKWARD_MAX_ITER+1):
+        grad0_max_prev = gradients[-1][0].abs().max(dim=-1)[0].max(dim=-1)[0]
+        gradients.append(grad(Pout, gv, grad_outputs=gradients[-1][0], create_graph=True))
+        grad0_max =  gradients[-1][0].abs().max(dim=-1)[0].max(dim=-1)[0]
+        if converged.any():
+            err = torch.max(grad0_max[converged])
+        else:
+            err = torch.tensor(0.0, device=grad_out.device)
+        if debug:
+            t = grad0_max[converged]>backward_eps
+            print('backward scf: ', k, err.item(), t.sum().item())
 
-            if (err < backward_eps) or (k >= SCF_BACKWARD_MAX_ITER): break
-            diverged = (grad0_max > grad0_max_prev) * (grad0_max>=1.0)
-            if diverged.any() and k>=MAX_ITER_TO_STOP_IF_SCF_BACKWARD_DIVERGE:
-                print("SCF backward diverges for %d molecules, stop after %d iterations" %
-                      (diverged.sum().item(), MAX_ITER_TO_STOP_IF_SCF_BACKWARD_DIVERGE))
-                break
-        ln = len(gradients)
-        for t, i in enumerate(gvind):
-            grads[i] = torch.sum(torch.stack([gradients[l][t+1] for l in range(1, ln)]), dim=0)
-#            for l in range(1, ln): grads[i].add_(gradients[l][t+1])
+        if (err < backward_eps): break
+        diverged = (grad0_max > grad0_max_prev) * (grad0_max>=1.0)
+        if diverged.any() and k>=MAX_ITER_TO_STOP_IF_SCF_BACKWARD_DIVERGE:
+            print("SCF backward diverges for %d molecules, stop after %d iterations" %
+                  (diverged.sum().item(), MAX_ITER_TO_STOP_IF_SCF_BACKWARD_DIVERGE))
+            break
+    ln = len(gradients)
+    for t, i in enumerate(gvind):
+        grads[i] = torch.sum(torch.stack([gradients[l][t+1] for l in range(1, ln)]), dim=0)
 
-        with torch.no_grad():
-            #one way is to check grad0.abs().max if they are smaller than backward_eps
-            #another way is to compare grad0.abs().max with previous grad0.abs().max, if
-            #      they are increasing, they are diverging
-            notconverged1 = (grad0_max>backward_eps) + (~torch.isfinite(grad0_max))
-            if notconverged.any():
-                print("SCF forward       : %d/%d not converged" % (notconverged.sum().item(),nmol))
-            if notconverged1.any():
-                print("SCF backward      : %d/%d not converged" % (notconverged1.sum().item(),nmol))
-                if RAISE_ERROR_IF_SCF_BACKWARD_FAILS:
-                    raise ValueError("SCF backward doesn't converged for some molecules")
-            notconverged_all = notconverged + notconverged1
-            if notconverged_all.any():
-                print("SCF for/back-ward : %d/%d not converged" % (notconverged.sum().item(),nmol))
-                cond = notconverged_all.detach()
-                #M, w, gss, gpp, gsp, gp2, hsp
-                #M shape(nmol*molsizes*molsize, 4, 4)
-                if torch.is_tensor(grads[1]):
-                    grads[1] = grads[1].reshape(nmol, molsize*molsize, 4, 4)
-                    grads[1][cond] = 0.0
-                    grads[1] = grads[1].reshape(nmol*molsize*molsize, 4, 4)
-                #w shape (npairs, 10, 10)
-                if torch.is_tensor(grads[2]):
-                    grads[2][cond[pair_molid]] = 0.0
-                #gss, gpp, gsp, gp2, hsp shape (natoms,)
-                for i in range(3,8):
-                    if torch.is_tensor(grads[i]):
-                        grads[i][cond[atom_molid]] = 0.0
-        
-        return grads[1], grads[2], grads[3], grads[4], grads[5], grads[6], grads[7], \
-               None, None, None, \
-               None, None, \
-               None, None, None, None, None, None, None, None
+    with torch.no_grad():
+        #one way is to check grad0.abs().max if they are smaller than backward_eps
+        #another way is to compare grad0.abs().max with previous grad0.abs().max, if
+        #      they are increasing, they are diverging
+        notconverged1 = (grad0_max>backward_eps) + (~torch.isfinite(grad0_max))
+        if notconverged.any():
+            print("SCF forward       : %d/%d not converged" % (notconverged.sum().item(),nmol))
+        if notconverged1.any():
+            print("SCF backward      : %d/%d not converged" % (notconverged1.sum().item(),nmol))
+            if RAISE_ERROR_IF_SCF_BACKWARD_FAILS:
+                raise ValueError("SCF backward doesn't converged for some molecules")
+        notconverged_all = notconverged + notconverged1
+        if notconverged_all.any():
+            print("SCF for/back-ward : %d/%d not converged" % (notconverged.sum().item(),nmol))
+            cond = notconverged_all.detach()
+            #M, w, gss, gpp, gsp, gp2, hsp
+            #M shape(nmol*molsizes*molsize, 4, 4)
+            if torch.is_tensor(grads[1]):
+                grads[1] = grads[1].reshape(nmol, molsize*molsize, 4, 4)
+                grads[1][cond] = 0.0
+                grads[1] = grads[1].reshape(nmol*molsize*molsize, 4, 4)
+            #w shape (npairs, 10, 10)
+            if torch.is_tensor(grads[2]):
+                grads[2][cond[pair_molid]] = 0.0
+            #gss, gpp, gsp, gp2, hsp shape (natoms,)
+            for i in range(3,8):
+                if torch.is_tensor(grads[i]):
+                    grads[i][cond[atom_molid]] = 0.0
+    
+    return grads[1], grads[2], grads[3], grads[4], grads[5], grads[6], grads[7], \
+           None, None, None, \
+           None, None, \
+           None, None, None, None, None, None, None, None
 
 
 
@@ -718,7 +721,7 @@ def scf_loop(const, molsize, nHeavy, nHydro, nOccMO, \
     tore = const.tore
     if const.do_timing: t0 = time.time()
     M, w = hcore(const, nmol, molsize, maskd, mask, idxi, idxj, ni,nj,xij,rij, Z, \
-                 zetas,zetap, uss, upp , gss, gpp, gp2, hsp, beta, Kbeta=Kbeta)
+                 zetas, zetap, uss, upp , gss, gpp, gp2, hsp, beta, Kbeta=Kbeta)
     
     if const.do_timing:
         if torch.cuda.is_available(): torch.cuda.synchronize()

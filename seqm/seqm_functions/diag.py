@@ -107,7 +107,7 @@ def construct_P(e, v, nocc):
 
 
 def sym_eig_trunc(x,nheavyatom,nH,nocc, eig_only=False):
-    sym_eigh = degen_symeig.apply if DEGEN_EIGENSOLVER else pytorch_symeig.apply
+    sym_eigh = degen_symeig.apply if DEGEN_EIGENSOLVER else pytorch_symeig
     dtype = x.dtype
     device = x.device
     if x.dim()==2:
@@ -221,8 +221,8 @@ def sym_eig_trunc(x,nheavyatom,nH,nocc, eig_only=False):
 
 
 def sym_eig_trunc1(x,nheavyatom,nH,nocc, eig_only=False):
-    sym_eigh = degen_symeig.apply if DEGEN_EIGENSOLVER else pytorch_symeig.apply
-    dtype =  x.dtype
+    sym_eigh = degen_symeig.apply if DEGEN_EIGENSOLVER else pytorch_symeig
+    dtype = x.dtype
     device = x.device
     
     if x.dim()==2:
@@ -288,15 +288,13 @@ def sym_eig_trunc1(x,nheavyatom,nH,nocc, eig_only=False):
     return e, P, v0
     
 
-class pytorch_symeig(torch.autograd.Function):
+def pytorch_symeig(A):
     """
     Effectively only a wrapper around pytorch's standard eigh
     (only for consistency, comparison, and testing)
     """
-    @staticmethod
-    def forward(ctx, A):
-        eival, eivec = torch.linalg.eigh(A, UPLO='U')
-        return eival, eivec
+    eival, eivec = torch.linalg.eigh(A, UPLO='U')
+    return eival, eivec
     
 
 class degen_symeig(torch.autograd.Function):
@@ -305,7 +303,6 @@ class degen_symeig(torch.autograd.Function):
     !!! ONLY APPLICABLE IF FINAL RESULT DOESN'T EXPLICITLY DEPEND
                     ON DEGENERATE EIGENVECTORS !!!
     Based on idea in M.F. Kasim, arXiv:2011.04366 (2020)
-    and consistent with https://github.com/xitorch/xitorch
     """
     @staticmethod
     def forward(ctx, A):

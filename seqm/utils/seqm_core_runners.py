@@ -150,7 +150,7 @@ class SEQM_singlepoint_core(torch.nn.Module):
         self.settings['elements'] = torch.tensor(elements, requires_grad=False)
         self.settings['learned'] = self.custom_params
         self.settings['eig'] = True
-        coordinates.requires_grad_(True)
+        if not coordinates.requires_grad: coordinates.requires_grad_(True)
         mol = Molecule(self.const, self.settings, coordinates, species)
         calc = Energy(self.settings).to(device)
 #        try:
@@ -168,9 +168,9 @@ class SEQM_singlepoint_core(torch.nn.Module):
         Eat_fin = res[0] * masking
         Etot_fin = res[1] * masking
         # forces
-        F = -agrad(res[1].sum(), coordinates, create_graph=True)[0]
+        F = -agrad(res[1].sum(), coordinates, retain_graph=True, create_graph=True)[0]
         F_fin = F * masking[...,None,None]
-        coordinates.requires_grad_(False)
+#        coordinates.requires_grad_(False)
         # HOMO-LUMO gap
         gap_fin = res[6] * masking
 #        my_parser = Parser(calc.seqm_parameters)

@@ -4,7 +4,7 @@ import numpy as np
 from copy import deepcopy as dcopy
 from seqm.seqm_functions.constants import Constants
 from seqm.seqm_functions.parameters import params
-from seqm.basics import Parser, Pack_Parameters, Energy
+from seqm.basics import Parser, Energy
 import seqm
 #seqm.seqm_functions.scf_loop.debug = True
 seqm.seqm_functions.scf_loop.SCF_BACKWARD_MAX_ITER = 15

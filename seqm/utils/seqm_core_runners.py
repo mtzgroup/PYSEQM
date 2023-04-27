@@ -12,6 +12,7 @@
 import torch
 from torch.autograd import grad as agrad
 from ..basics import Parser, Energy
+from ..Molecule import Molecule
 from ..seqm_functions.constants import Constants
 from .pyseqm_helpers import get_default_parameters
 from ..seqm_functions.parameters import params
@@ -34,7 +35,7 @@ default_settings = {
                     'method'            : 'AM1',
                     'scf_eps'           : 1.0e-6,
                     'scf_converger'     : [0,0.15],
-                    'scf_backward'      : 2,
+                    'scf_backward'      : 1,
                     'scf_backward_eps'  : 1e-4,
                     'sp2'               : sp2_def,
                     'pair_outer_cutoff' : 1.0e10,
@@ -150,10 +151,10 @@ class SEQM_singlepoint_core(torch.nn.Module):
         self.settings['learned'] = self.custom_params
         self.settings['eig'] = True
         coordinates.requires_grad_(True)
+        mol = Molecule(self.const, self.settings, coordinates, species)
         calc = Energy(self.settings).to(device)
 #        try:
-        res = calc(self.const, coordinates, species, learnedpar, 
-                       all_terms=True)
+        res = calc(mol, learnedpar, all_terms=True)
 #        except:# (RuntimeError, torch._C._LinAlgError):
 #            p.register_hook(lambda grad: grad * 0.)
 #            coordinates.register_hook(lambda grad: grad * 0.)
@@ -171,13 +172,14 @@ class SEQM_singlepoint_core(torch.nn.Module):
         F_fin = F * masking[...,None,None]
         coordinates.requires_grad_(False)
         # HOMO-LUMO gap
-        my_parser = Parser(calc.seqm_parameters)
-        n_occ = my_parser(self.const, species, coordinates)[4]
-        homo = (n_occ-1).unsqueeze(-1)
-        lumo = n_occ.unsqueeze(-1)
-        ehomo = torch.gather(res[6], 1, homo).reshape(-1)
-        elumo = torch.gather(res[6], 1, lumo).reshape(-1)
-        gap_fin = (elumo - ehomo) * masking
+        gap_fin = res[6] * masking
+#        my_parser = Parser(calc.seqm_parameters)
+#        n_occ = my_parser(self.const, species, coordinates)[4]
+#        homo = (n_occ-1).unsqueeze(-1)
+#        lumo = n_occ.unsqueeze(-1)
+#        ehomo = torch.gather(res[6], 1, homo).reshape(-1)
+#        elumo = torch.gather(res[6], 1, lumo).reshape(-1)
+#        gap_fin = (elumo - ehomo) * masking
         # update self.results dict
         self.results['atomization'] = Eat_fin
         self.results['energy'] = Etot_fin

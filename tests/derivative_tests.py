@@ -8,16 +8,20 @@ seqm.seqm_functions.scf_loop.debug = False
 seqm.seqm_functions.diag.DEGEN_EIGENSOLVER = True
 seqm.seqm_functions.scf_loop.SCF_BACKWARD_MAX_ITER = 400
 seqm.seqm_functions.scf_loop.SCF_IMPLICIT_BACKWARD = True
-seqm.seqm_functions.scf_loop.SCF_BACKWARD_ANDERSON_TOLERANCE = 1e-6
-seqm.seqm_functions.scf_loop.SCF_BACKWARD_ANDERSON_MAXITER = 200
-seqm.seqm_functions.scf_loop.SCF_BACKWARD_ANDERSON_HISTSIZE = 12
+seqm.seqm_functions.scf_loop.SCF_BACKWARD_ANDERSON_TOLERANCE = 1e-4
+seqm.seqm_functions.scf_loop.SCF_BACKWARD_ANDERSON_MAXITER = 40
+seqm.seqm_functions.scf_loop.SCF_BACKWARD_ANDERSON_HISTSIZE = 5
+
+seqm.seqm_functions.scf_loop.SCF_BACKWARD_MAX_ITER = 200
+
+
 torch.set_default_dtype(torch.double) # safe choice for finite differences in gradcheck
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
 
 prop = "energy"#"gap"
-variable = "param"#"coords"#"param"
+variable = "coords"#"param"
 uhf = True
 
 if uhf:
@@ -59,7 +63,7 @@ seqm_parameters = {
                    'learned'           : lpar,
                    'pair_outer_cutoff' : 1e10, 
                    'scf_backward'      : 0,
-                   'scf_backward_eps'  : 1e-12,
+                   'scf_backward_eps'  : 1e-9,
                    'parameter_file_dir': '/home/martin/work/software/PYSEQM/seqm/params/',
                    'eig'               : prop=="gap",
                    'UHF'               : uhf,

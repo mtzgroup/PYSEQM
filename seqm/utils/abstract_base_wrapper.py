@@ -313,7 +313,7 @@ class ABW(torch.nn.Module, ABC):
         x.requires_grad_(False)
         self.loss_func.raw_loss = 0.
         self.loss_func.individual_loss[:] = 0.
-        self.loss_func.individual_per_mol = [[],]*self.n_impl
+#        self.loss_func.individual_per_mol = [[],]*self.n_impl
         Ltot, ntot, nfail_tot = 0., 0., 0
         for (inputs, refs, weights) in dataloader:
             inputs = [inp.to(device) for inp in inputs]
@@ -345,7 +345,7 @@ class ABW(torch.nn.Module, ABC):
         Ltot = Ltot / ntot
         self.raw_loss = self.loss_func.raw_loss / ntot
         self.individual_loss = self.loss_func.individual_loss / ntot
-        self.individual_per_mol = self.loss_func.individual_per_mol
+#        self.individual_per_mol = self.loss_func.individual_per_mol
         if (nfail_tot > 0):
             print("SCF failed to converge for ",nfail_tot," molecules.")
             if k_fail: return 1e3 * nfail_tot + self.raw_loss
@@ -456,7 +456,8 @@ class ABW(torch.nn.Module, ABC):
     def get_individual_loss(self, prop, per_molecule=False):
         idx = prop2index[prop]
         if per_molecule:
-            return self.individual_per_mol[idx]
+            raise NotImplementedError
+#            return self.individual_per_mol[idx]
         else:
             return self.individual_loss[idx].item()
 

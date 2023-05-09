@@ -70,8 +70,8 @@ class ABW(torch.nn.Module, ABC):
         pass
         
     
-    def train(self, x, dataloader, n_epochs=4, include=None, optimizer="Adam",
-              opt_kwargs={}, opt_mode="stochastic", n_up_thresh=5, up_thresh=1e-4,
+    def train(self, x, dataloader, n_epochs=4, optimizer="Adam", opt_kwargs={}, 
+              opt_mode="stochastic", n_up_thresh=5, up_thresh=1e-4,
               loss_conv=1e-8, loss_step_conv=1e-8, scheduler=None, scheduler_kwargs={},
               validation_loader=None, SCFfail_penalty=[1e2,1e-5,1e-6]):
         """
@@ -83,7 +83,6 @@ class ABW(torch.nn.Module, ABC):
           . dataloader, torch.utils.data.Dataloader: dataloader for training
                 (see seqm.utils.dataloaders)
           . n_epochs, int: number of epochs in optimization
-          . include, list of str: list of properties to include in loss
           . optimizer, str: optimizer from torh.optim for running minimization
                 default: Adam
                 NOTES:
@@ -136,11 +135,11 @@ class ABW(torch.nn.Module, ABC):
             self.train_epoch = self.train_full
         else:
             raise ValueError("Unknown optimization mode '"+opt_mode+"'")
+        if len(self.include_loss) == 0:
+            msg  = "You did not specify any property to include in the loss "
+            msg += "function. Please do so in the model construction!"
+            raise ValueError(msg)
         self.SCFfail_penalty = SCFfail_penalty
-        if any(prop not in self.implemented_properties for prop in include):
-            raise ValueError("Requested property/ies not available.")
-        if include is not None:
-            self.include_loss = sorted([prop2index[prop] for prop in include])
         Lbak, n_up, self.minimize_log = torch.inf, 0, []
         logmsg  = "\n  SEQC OPTIMIZATION BROUGHT TO YOU BY SLOWCODE, INC."
         logmsg += "\n"+"-"*73
@@ -310,6 +309,10 @@ class ABW(torch.nn.Module, ABC):
         
     
     def get_loss(self, x, dataloader, k_fail=False):
+        if len(self.include_loss) == 0:
+            msg  = "You did not specify any property to include in the loss "
+            msg += "function. Please do so in the model construction!"
+            raise ValueError(msg)
         x.requires_grad_(False)
         self.loss_func.raw_loss = 0.
         self.loss_func.individual_loss[:] = 0.
@@ -353,6 +356,10 @@ class ABW(torch.nn.Module, ABC):
         
     
     def loss_and_grad(self, x, dataloader, k_fail=False):
+        if len(self.include_loss) == 0:
+            msg  = "You did not specify any property to include in the loss "
+            msg += "function. Please do so in the model construction!"
+            raise ValueError(msg)
         Ltot, ntot, nfail_tot = 0., 0., 0
         dLdx = torch.zeros_like(x, requires_grad=False, device=device)
         self.loss_func.raw_loss = 0.

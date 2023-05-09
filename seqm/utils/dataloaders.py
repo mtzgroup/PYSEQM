@@ -14,42 +14,38 @@ from torch.utils.data._utils.collate import collate
 from h5py4mol import dataloader as h5pyloader
 
 
-inp2int = {"species":"species",
-           "coordinates":"coordinates",
-           "atomization_ref":"Eat_ref",
-           "atomization_weight":"Eat_weight",
-           "energy_ref":"Etot_ref",
-           "energy_weight":"Etot_weight",
-           "forces_ref":"F_ref",
-           "forces_weight":"F_weight",
-           "gap_ref":"gap_ref",
-           "gap_weight":"gap_weight",
-          }
-base_inps = [k for k in inp2int.keys()]
-pad_inps = ["coordinates","forces_ref"]
 weight_inps = ["atomization_weight", "energy_weight", "forces_weight",
                "gap_weight"]
 
 class AbstractLoader(Dataset, ABC):
-    def __init__(self, species, coordinates, atomization_ref=None, 
-                 atomization_weight=1., energy_ref=None, energy_weight=1.,
-                 forces_ref=None, forces_weight=1., gap_ref=None,
-                 gap_weight=1.):
+    def __init__(self, hdf5_file, labels, atomization_weight=1., 
+                 energy_weight=1., forces_weight=1., gap_weight=1.,
+                 read_desc=False):
         super(AbstractLoader, self).__init__()
-        for inp in base_inps:
-            inp_obj = eval(inp)
-            int_nam = inp2int[inp]
-            if not torch.is_tensor(inp_obj):
-                if inp in pad_inps or (isinstance(inp_obj, list) and torch.is_tensor(inp_obj[0])):
-                    exec("self."+int_nam+" = pad_sequence("+inp+", batch_first=True)")
-                    exec("self."+int_nam+".requires_grad_(False)")
-                else:
-                    exec("self."+int_nam+" = torch.tensor("+inp+", requires_grad=False)")
-            else:
-                exec("self."+int_nam+" = "+inp)
-                exec("self."+int_nam+".requires_grad_(False)")
-        self.nMols = self.species.shape[0]
-
+        self.nMols = len(labels)
+        for w_inp in weight_inps: exec("self."+w_inp+" = "+w_inp)
+        Z, xyz, desc, Eat, Etot, F, gap = [], [], [], [], [], [], []
+        for l in labels:
+            with h5pyloader(hdf5_file) as dl: my_data = dl.get_data(l)
+            Z.append(torch.tensor(my_data['atomic_numbers'], requires_grad=False))
+            xyz.append(torch.tensor(my_data['positions']))
+            Eat.append(my_data['dft_atomization'])
+            Etot.append(my_data['dft_energy'])
+            F.append(torch.tensor(my_data['dft_forces'], requires_grad=False))
+            gap.append(my_data['dft_homo_lumo_gap'])
+            if read_desc: desc.append(my_data['SOAP0'])
+        self.species = pad_sequence(Z, batch_first=True)
+        self.species.requires_grad_(False)
+        self.coordinates = pad_sequence(xyz, batch_first=True)
+        if read_desc:
+            self.desc = pad_sequence(desc, batch_first=True)
+            self.desc.requires_grad_(False)
+        self.Eat_ref = torch.tensor(Eat, requires_grad=False)
+        self.Etot_ref = torch.tensor(Etot, requires_grad=False)
+        self.F_ref = pad_sequence(F, batch_first=True)
+        self.F_ref.requires_grad_(False)
+        self.gap_ref = torch.tensor(gap, requires_grad=False)
+    
     def __len__(self): return self.nMols
 
     @abstractmethod
@@ -68,43 +64,30 @@ class AbstractLoader(Dataset, ABC):
 
 
 class SEQM_data(AbstractLoader):
-    def __init__(self, species, coordinates, atomization_ref=None, 
-                 atomization_weight=1., energy_ref=None, energy_weight=1.,
-                 forces_ref=None, forces_weight=1., gap_ref=None,
-                 gap_weight=1.):
-        super(SEQM_data, self).__init__(species, coordinates,
-                        atomization_ref=atomization_ref,
-                        atomization_weight=atomization_weight,
-                        energy_ref=energy_ref, energy_weight=energy_weight,
-                        forces_ref=forces_ref, forces_weight=forces_weight,
-                        gap_ref=gap_ref, gap_weight=gap_weight)
+    def __init__(self, hdf5_file, labels, atomization_weight=1.,
+                 energy_weight=1., forces_weight=1., gap_weight=1.):
+        super(SEQM_data, self).__init__(hdf5_file, labels,
+            atomization_weight=atomization_weight, energy_weight=energy_weight,
+            forces_weight=forces_weight, gap_weight=gap_weight)
     
     def __getitem__(self, idx):
         inputs = (self.species[idx], self.coordinates[idx])
         refs = (self.Eat_ref[idx], self.Etot_ref[idx], self.F_ref[idx], self.gap_ref[idx])
-        weights = (self.Eat_weight, self.Etot_weight, self.F_weight, self.gap_weight)
+        weights = (self.atomization_weight, self.energy_weight, self.forces_weight, self.gap_weight)
         return inputs, refs, weights
     
 
 class AMASE_data(AbstractLoader):
-    def __init__(self, species, coordinates, desc, atomization_ref=None, 
-                 atomization_weight=1., energy_ref=None, energy_weight=1.,
-                 forces_ref=None, forces_weight=1., gap_ref=None,
-                 gap_weight=1.):
-        super(AMASE_data, self).__init__(species, coordinates,
-                        atomization_ref=atomization_ref,
-                        atomization_weight=atomization_weight,
-                        energy_ref=energy_ref, energy_weight=energy_weight,
-                        forces_ref=forces_ref, forces_weight=forces_weight,
-                        gap_ref=gap_ref, gap_weight=gap_weight)
-        if not torch.is_tensor(desc) or (isinstance(desc, list) and torch.is_tensor(desc[0])):
-            self.desc = pad_sequence(desc, batch_first=True)
-        self.desc.requires_grad_(False)
+    def __init__(self, hdf5_file, labels, atomization_weight=1., 
+                 energy_weight=1., forces_weight=1., gap_weight=1.):
+        super(AMASE_data, self).__init__(hdf5_file, labels,
+            atomization_weight=atomization_weight, energy_weight=energy_weight,
+            forces_weight=forces_weight, gap_weight=gap_weight, read_desc=True)
         
     def __getitem__(self, idx):
         inputs = (self.species[idx], self.coordinates[idx], self.desc[idx])
         refs = (self.Eat_ref[idx], self.Etot_ref[idx], self.F_ref[idx], self.gap_ref[idx])
-        weights = (self.Eat_weight, self.Etot_weight, self.F_weight, self.gap_weight)
+        weights = (self.atomization_weight, self.energy_weight, self.forces_weight, self.gap_weight)
         return inputs, refs, weights
     
 
@@ -147,9 +130,7 @@ class AbstractHDF5Loader(Dataset, ABC):
         self.db_file = hdf5_file
         self.nMols = len(labels)
         self.db_labels = labels
-        for w_inp in weight_inps:
-            int_nam = inp2int[w_inp]
-            exec("self."+int_nam+" = "+w_inp)
+        for w_inp in weight_inps: exec("self."+w_inp+" = "+w_inp)
         
     def __len__(self): return self.nMols
     
@@ -187,7 +168,7 @@ class SEQM_HDF5data(AbstractHDF5Loader):
         gap = my_data['dft_homo_lumo_gap']
         inputs = (Z, xyz)
         refs = (Eat, Etot, F, gap)
-        weights = (self.Eat_weight, self.Etot_weight, self.F_weight, self.gap_weight)
+        weights = (self.atomization_weight, self.energy_weight, self.forces_weight, self.gap_weight)
         return inputs, refs, weights
         
     
@@ -210,7 +191,7 @@ class AMASE_HDF5data(AbstractHDF5Loader):
         desc = torch.tensor(my_data['SOAP0'], requires_grad=False)
         inputs = (Z, xyz, desc)
         refs = (Eat, Etot, F, gap)
-        weights = (self.Eat_weight, self.Etot_weight, self.F_weight, self.gap_weight)
+        weights = (self.atomization_weight, self.energy_weight, self.forces_weight, self.gap_weight)
         return inputs, refs, weights
     
 

@@ -24,7 +24,7 @@ class AbstractLoader(Dataset, ABC):
         super(AbstractLoader, self).__init__()
         self.nMols = len(labels)
         for w_inp in weight_inps: exec("self."+w_inp+" = "+w_inp)
-        Z, xyz, desc, Eat, Etot, F, gap = [], [], [], [], [], [], []
+        Z, xyz, X, Eat, Etot, F, gap = [], [], [], [], [], [], []
         for l in labels:
             with h5pyloader(hdf5_file) as dl: my_data = dl.get_data(l)
             Z.append(torch.tensor(my_data['atomic_numbers'], requires_grad=False))
@@ -33,13 +33,12 @@ class AbstractLoader(Dataset, ABC):
             Etot.append(my_data['dft_energy'])
             F.append(torch.tensor(my_data['dft_forces'], requires_grad=False))
             gap.append(my_data['dft_homo_lumo_gap'])
-            if read_desc: desc.append(my_data['SOAP0'])
+            if read_desc:
+                X.append(torch.tensor(my_data['SOAP0'], requires_grad=False))
         self.species = pad_sequence(Z, batch_first=True)
         self.species.requires_grad_(False)
         self.coordinates = pad_sequence(xyz, batch_first=True)
-        if read_desc:
-            self.desc = pad_sequence(desc, batch_first=True)
-            self.desc.requires_grad_(False)
+        if read_desc: self.desc = pad_sequence(desc, batch_first=True)
         self.Eat_ref = torch.tensor(Eat, requires_grad=False)
         self.Etot_ref = torch.tensor(Etot, requires_grad=False)
         self.F_ref = pad_sequence(F, batch_first=True)

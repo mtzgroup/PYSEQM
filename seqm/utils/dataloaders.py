@@ -38,7 +38,7 @@ class AbstractLoader(Dataset, ABC):
         self.species = pad_sequence(Z, batch_first=True)
         self.species.requires_grad_(False)
         self.coordinates = pad_sequence(xyz, batch_first=True)
-        if read_desc: self.desc = pad_sequence(desc, batch_first=True)
+        if read_desc: self.desc = pad_sequence(X, batch_first=True)
         self.Eat_ref = torch.tensor(Eat, requires_grad=False)
         self.Etot_ref = torch.tensor(Etot, requires_grad=False)
         self.F_ref = pad_sequence(F, batch_first=True)

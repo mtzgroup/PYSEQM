@@ -196,12 +196,10 @@ class elementwiseSEQM_trainer(ABW):
     """
     def __init__(self, custom_params=[], seqm_settings=None, mode="full",
                  elements=[], use_custom_reference=False, loss_include=[],
-                 loss_type="RSSperAtom", loss_args=(), loss_kwargs={}, 
-                 regularizer={'kind':None}):
+                 loss_type="RSSperAtom", loss_args=(), loss_kwargs={}):
         super(elementwiseSEQM_trainer, self).__init__(custom_params=custom_params,
                                 loss_include=loss_include, loss_type=loss_type,
-                                loss_args=loss_args, loss_kwargs=loss_kwargs,
-                                regularizer=regularizer)
+                                loss_args=loss_args, loss_kwargs=loss_kwargs)
         self.core_runner = SEQM_singlepoint_core(seqm_settings, mode=mode,
                                 custom_params=custom_params, elements=elements,
                                 use_custom_reference=use_custom_reference)
@@ -260,12 +258,10 @@ class SEQM_trainer(ABW):
     """
     def __init__(self, custom_params=[], seqm_settings=None, mode="full",
                  elements=[], use_custom_reference=False, loss_include=[],
-                 loss_type="RSSperAtom", loss_args=(), loss_kwargs={},
-                 regularizer={'kind':None}):
+                 loss_type="RSSperAtom", loss_args=(), loss_kwargs={}):
         super(SEQM_trainer, self).__init__(custom_params=custom_params,
                                 loss_include=loss_include, loss_type=loss_type,
-                                loss_args=loss_args, loss_kwargs=loss_kwargs,
-                                regularizer=regularizer)
+                                loss_args=loss_args, loss_kwargs=loss_kwargs)
         self.core_runner = SEQM_singlepoint_core(seqm_settings, mode=mode,
                               custom_params=custom_params, elements=elements,
                               use_custom_reference=use_custom_reference)
@@ -305,12 +301,10 @@ class AMASE_trainer(ABW):
     def __init__(self, reference_Z, reference_desc, reference_coordinates=None,
                  custom_params=None, seqm_settings=None, mode="full", expK=1,
                  elements=[], use_custom_reference=False, loss_include=[],
-                 loss_type="RSSperAtom", loss_args=(), loss_kwargs={},
-                 regularizer={'kind':None}):
+                 loss_type="RSSperAtom", loss_args=(), loss_kwargs={}):
         super(AMASE_trainer, self).__init__(custom_params=custom_params,
                                 loss_include=loss_include, loss_type=loss_type,
-                                loss_args=loss_args, loss_kwargs=loss_kwargs,
-                                regularizer=regularizer)
+                                loss_args=loss_args, loss_kwargs=loss_kwargs)
         if isinstance(reference_Z, list):
             with torch.no_grad():
                 reference_Z = pad_sequence(reference_Z, batch_first=True)

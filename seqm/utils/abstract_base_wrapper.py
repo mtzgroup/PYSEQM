@@ -40,8 +40,7 @@ class ABW(torch.nn.Module, ABC):
     and provide a corresponding implementation of `self.run_calculation(x)`.
     """
     def __init__(self, custom_params=None, loss_include=[], 
-                 loss_type="RSSperAtom", loss_args=(), loss_kwargs={},
-                 regularizer={'kind':None}):
+                 loss_type="RSSperAtom", loss_args=(), loss_kwargs={}):
         """
         Parameters:
         -----------
@@ -50,13 +49,13 @@ class ABW(torch.nn.Module, ABC):
         . loss_type, str: type of loss function to use
         . loss_args, tuple: arguments to loss function
         . loss_kwargs, dict: dictionary of kwargs for loss function
-        . regularizer, dict: penalty to add to loss function
-            keys: 'kind': (None|'pure'|'param')
-                  'type': ('quadratic'|'power'|'well')
-                  'scale': float   # 'quadratic'|'power'|'well'
-                  'shift': float   # 'quadratic'|'power'|'well'
-                  'steep': float   # 'well'
-                  'exponent': int  # 'power'
+            including: regularizer, dict: penalty to add to loss function
+                keys: 'kind': (None|'pure'|'param')
+                      'type': ('quadratic'|'power'|'well')
+                      'scale': float   # 'quadratic'|'power'|'well'
+                      'shift': float   # 'quadratic'|'power'|'well'
+                      'steep': float   # 'well'
+                      'exponent': int  # 'power'
                 for more details, see module loss_functions
         """
 
@@ -69,8 +68,7 @@ class ABW(torch.nn.Module, ABC):
         ## collect attributes from input
         if loss_type not in self.implemented_loss_types:
             raise ValueError("Unknown loss type '"+loss_type+"'.")
-        argstr  = "(*loss_args, n_implemented_properties=self.n_impl, "
-        argstr += "regularizer=regularizer, **loss_kwargs)"
+        argstr = "(*loss_args, n_implemented_properties=self.n_impl, **loss_kwargs)"
         exec("self.loss_func = " + loss_type + argstr)
         if any(prop not in self.implemented_properties for prop in loss_include):
             raise ValueError("Requested property/ies not available.")

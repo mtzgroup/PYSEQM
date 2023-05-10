@@ -7,7 +7,7 @@
 #                                                                          #
 # Curent (Feb/06): Basic implementation                                    #
 # TODO:  . typing                                                          #
-#        . refactor                                                        #
+#        . switch back to multirun?                                        #
 #        . ?add MD/geometry optimization engine?                           #
 #        . custom backwards for (unlikely) RuntimeErrors in forward        #
 ############################################################################
@@ -36,8 +36,10 @@ class AMASE_singlepoint_core(torch.nn.Module):
     
     def forward(self, Alpha, Z, positions, desc, custom_reference=None, expK=1):
         pred = self.kernel(Alpha, Z, desc, expK=expK)
+        self.seqc_params = pred
         res, failed = self.seqm_runner(pred, Z, positions, 
                                custom_reference=custom_reference)
+        self.rel_params = self.seqm_runner.rel_params
         self.results = self.seqm_runner.results
         return res, failed
     
@@ -96,6 +98,8 @@ class AMASE_multirun_core(torch.nn.Module):
                            self.ref_idx, self.K))
         for i, idx in enumerate(self.elm_idx): pred[:,idx] = Alpha_K[i]
         res, failed = self.seqm_runner(pred)
+        self.seqc_params = pred.clone()
+        self.rel_params = self.seqm_runner.rel_params
         self.results = self.seqm_runner.results
         return res, failed
     

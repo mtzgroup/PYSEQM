@@ -40,8 +40,26 @@ class ABW(torch.nn.Module, ABC):
     and provide a corresponding implementation of `self.run_calculation(x)`.
     """
     def __init__(self, custom_params=None, loss_include=[], 
-                 SCFfail_penalty=[1e2,1e-5,1e-6], loss_type="RSSperAtom",
-                 loss_args=(), loss_kwargs={}):
+                 loss_type="RSSperAtom", loss_args=(), loss_kwargs={},
+                 regularizer={'kind':None}):
+        """
+        Parameters:
+        -----------
+        . custom_params, :
+        . loss_include, list: list of properties to include in loss model
+        . loss_type, str: type of loss function to use
+        . loss_args, tuple: arguments to loss function
+        . loss_kwargs, dict: dictionary of kwargs for loss function
+        . regularizer, dict: penalty to add to loss function
+            keys: 'kind': (None|'pure'|'param')
+                  'type': ('quadratic'|'power'|'well')
+                  'scale': float   # 'quadratic'|'power'|'well'
+                  'shift': float   # 'quadratic'|'power'|'well'
+                  'steep': float   # 'well'
+                  'exponent': int  # 'power'
+                for more details, see module loss_functions
+        """
+
         ## initialize parent modules and attributes
         super(ABW, self).__init__()
         self.implemented_properties = ['atomization','energy','forces','gap']
@@ -51,14 +69,14 @@ class ABW(torch.nn.Module, ABC):
         ## collect attributes from input
         if loss_type not in self.implemented_loss_types:
             raise ValueError("Unknown loss type '"+loss_type+"'.")
-        argstr = "(*loss_args, n_implemented_properties=self.n_impl, **loss_kwargs)"
+        argstr  = "(*loss_args, n_implemented_properties=self.n_impl, "
+        argstr += "regularizer=regularizer, **loss_kwargs)"
         exec("self.loss_func = " + loss_type + argstr)
-        self.SCFfail_penalty = SCFfail_penalty
         if any(prop not in self.implemented_properties for prop in loss_include):
             raise ValueError("Requested property/ies not available.")
         self.include_loss = sorted([prop2index[prop] for prop in loss_include])
         self.custom_params = custom_params
-#        self.last_x = 0.
+        self.seqc_params = None
         
     
     @abstractmethod
@@ -73,7 +91,7 @@ class ABW(torch.nn.Module, ABC):
     def train(self, x, dataloader, n_epochs=4, optimizer="Adam", opt_kwargs={}, 
               opt_mode="stochastic", n_up_thresh=5, up_thresh=1e-4,
               loss_conv=1e-8, loss_step_conv=1e-8, scheduler=None, scheduler_kwargs={},
-              validation_loader=None, SCFfail_penalty=[1e2,1e-5,1e-6]):
+              validation_loader=None):
         """
         Generic routine for minimizing loss.
         
@@ -108,8 +126,6 @@ class ABW(torch.nn.Module, ABC):
           . scheduler_kwargs, {}/list of {}: kwargs for scheduler(s)
           . validation_loader, torch.utils.data.Dataloader: dataloader for validation
                 (see seqm.utils.dataloaders)
-          . SCFfail_penalty, tuple/list len(3): scaling, width, and offset along step
-                direction of Gaussian penalty function for failed SCF convergence
         
         Returns:
         --------
@@ -139,12 +155,11 @@ class ABW(torch.nn.Module, ABC):
             msg  = "You did not specify any property to include in the loss "
             msg += "function. Please do so in the model construction!"
             raise ValueError(msg)
-        self.SCFfail_penalty = SCFfail_penalty
+
         Lbak, n_up, self.minimize_log = torch.inf, 0, []
         logmsg  = "\n  SEQC OPTIMIZATION BROUGHT TO YOU BY SLOWCODE, INC."
         logmsg += "\n"+"-"*73
         print(logmsg)
-#        self.last_x = x.detach().clone()
         for epoch in range(n_epochs):
             if validation_loader is not None:
                 x.requires_grad_(False)
@@ -202,7 +217,6 @@ class ABW(torch.nn.Module, ABC):
             weights = [w.to(device) for w in weights]
             self.ntot_tst += inputs[0].shape[0]
             nAtoms = torch.count_nonzero(inputs[0], dim=1)
-#            last_step = x.detach().clone() - self.last_x
             def closure():
                 self.opt.zero_grad()
                 res, failed = self(x, *inputs)
@@ -213,32 +227,23 @@ class ABW(torch.nn.Module, ABC):
                     my_refs = [ref[mask] for ref in refs]
                     my_nA = nAtoms[mask]
                     self.ntot_tst -= failed.count_nonzero()
-#                    with torch.no_grad():
-#                        penalty = failed.count_nonzero()*self.SCFfail_penalty[0]
-#                        penalty_width = self.SCFfail_penalty[1]
-#                        offset = last_step * self.SCFfail_penalty[2]
-#                        center = x.detach().clone() + offset
-#                        self.loss_func.add_penalty(center,sigma=penalty_width,
-#                                                   scale=penalty)
                 else:
                     my_refs, my_w, my_nA = refs, weights, nAtoms
-                loss = self.loss_func(res, my_refs, x, nAtoms=my_nA, 
+                loss = self.loss_func(res, my_refs, nAtoms=my_nA, 
                                     weights=my_w, include=self.include_loss,
-                                    extensive=self.is_extensive)
+                                    extensive=self.is_extensive,
+                                    x=self.rel_params)
                 x.grad = agrad(loss, x)[0]
                 return loss
-#            self.last_x = x.detach().clone()
             L = self.opt.step(closure)
             Ltot += L.item()
         self.ntot_tst = max(self.ntot_tst, 1)
-        self.raw_loss = self.loss_func.raw_loss / self.ntot_tst
         self.individual_loss = self.loss_func.individual_loss / self.ntot_tst
         return Ltot / self.ntot_tst
         
     
     def train_full(self, x, dataloader):
-        self.loss_func.raw_loss = 0.
-        self.loss_func.individual_loss[:] = 0.
+        self.x = x
         def closure():
             ntot, Ltot = 0., torch.tensor(0., device=device)
             self.opt.zero_grad()
@@ -249,7 +254,6 @@ class ABW(torch.nn.Module, ABC):
                 weights = [w.to(device) for w in weights]
                 ntot += inputs[0].shape[0]
                 nAtoms = torch.count_nonzero(inputs[0], dim=1)
-#                last_step = x.detach().clone() - self.last_x
                 res, failed = self(x, *inputs)
                 if failed.any():
                     mask = torch.where(~failed)
@@ -258,26 +262,16 @@ class ABW(torch.nn.Module, ABC):
                     weights = [w[mask] for w in weights]
                     nAtoms = nAtoms[mask]
                     ntot -= failed.count_nonzero()
-#                    with torch.no_grad():
-#                        penalty = failed.count_nonzero()*self.SCFfail_penalty[0]
-#                        penalty_width = self.SCFfail_penalty[1]
-#                        offset = last_step * self.SCFfail_penalty[2]
-#                        center = x.detach().clone() + offset
-#                        self.loss_func.add_penalty(center,sigma=penalty_width,
-#                                                   scale=penalty)
-                loss = self.loss_func(res, refs, x, nAtoms=nAtoms,
+                loss = self.loss_func(res, refs, nAtoms=nAtoms,
                             weights=weights, include=self.include_loss,
-                            extensive=self.is_extensive)
+                            extensive=self.is_extensive,
+                            x=self.rel_params)
                 dLdx = dLdx + agrad(loss, x)[0]
                 Ltot = Ltot + loss.item()
             ntot = max(ntot, 1)
-            self.raw_loss = self.loss_func.raw_loss / ntot
-            self.individual_loss = self.loss_func.individual_loss / ntot
             Ltot = Ltot / ntot
-#            Ltot.backward()
             x.grad = dLdx
             return Ltot
-#        self.last_x = x.detach().clone()
         L = self.opt.step(closure)
         Lout = L.item()
         return Lout
@@ -300,7 +294,7 @@ class ABW(torch.nn.Module, ABC):
                 weights = [w[mask] for w in weights]
                 nAtoms = nAtoms[mask]
                 nval -= failed.count_nonzero().item()
-            loss = self.loss_func(res, refs, x, nAtoms=nAtoms, 
+            loss = self.loss_func(res, refs, nAtoms=nAtoms, 
                             weights=weights, include=self.include_loss,
                             extensive=self.is_extensive)
             Lval += loss.item()
@@ -308,15 +302,15 @@ class ABW(torch.nn.Module, ABC):
         return Lval / nval
         
     
-    def get_loss(self, x, dataloader, k_fail=False):
+    def get_loss(self, x, dataloader, raw=False):
         if len(self.include_loss) == 0:
             msg  = "You did not specify any property to include in the loss "
             msg += "function. Please do so in the model construction!"
             raise ValueError(msg)
         x.requires_grad_(False)
+        self.x = x
         self.loss_func.raw_loss = 0.
         self.loss_func.individual_loss[:] = 0.
-#        self.loss_func.individual_per_mol = [[],]*self.n_impl
         Ltot, ntot, nfail_tot = 0., 0., 0
         for (inputs, refs, weights) in dataloader:
             inputs = [inp.to(device) for inp in inputs]
@@ -334,32 +328,24 @@ class ABW(torch.nn.Module, ABC):
                 n_fail = failed.count_nonzero()
                 nfail_tot += n_fail.item()
                 ntot -= n_fail.item()
-#                with torch.no_grad():
-#                    penalty = n_fail * self.SCFfail_penalty[0]
-#                    penalty_width = self.SCFfail_penalty[1]
-#                    center = x.detach().clone()
-#                    self.loss_func.add_penalty(center,sigma=penalty_width,
-#                                               scale=penalty)
-            L = self.loss_func(res, refs, x, nAtoms=nAtoms,
+            Lfull = self.loss_func(res, refs, nAtoms=nAtoms,
                                weights=weights, include=self.include_loss,
-                               extensive=self.is_extensive)
+                               extensive=self.is_extensive,
+                               x=self.rel_params)
+            L = self.loss_func.raw_loss if raw else Lfull
             Ltot += L.item()
         ntot = max(ntot, 1)
         Ltot = Ltot / ntot
-        self.raw_loss = self.loss_func.raw_loss / ntot
         self.individual_loss = self.loss_func.individual_loss / ntot
-#        self.individual_per_mol = self.loss_func.individual_per_mol
-        if (nfail_tot > 0):
-            print("SCF failed to converge for ",nfail_tot," molecules.")
-            if k_fail: return 1e3 * nfail_tot + self.raw_loss
         return Ltot
         
     
-    def loss_and_grad(self, x, dataloader, k_fail=False):
+    def loss_and_grad(self, x, dataloader, raw=False):
         if len(self.include_loss) == 0:
             msg  = "You did not specify any property to include in the loss "
             msg += "function. Please do so in the model construction!"
             raise ValueError(msg)
+        self.x = x
         Ltot, ntot, nfail_tot = 0., 0., 0
         dLdx = torch.zeros_like(x, requires_grad=False, device=device)
         self.loss_func.raw_loss = 0.
@@ -380,26 +366,16 @@ class ABW(torch.nn.Module, ABC):
                 n_fail = failed.count_nonzero().item()
                 nfail_tot += n_fail
                 ntot -= n_fail
-#                last_step = x.detach().clone() - self.last_x
-#                with torch.no_grad():
-#                    penalty = n_fail * self.SCFfail_penalty[0]
-#                    penalty_width = self.SCFfail_penalty[1]
-#                    offset = last_step * self.SCFfail_penalty[2]
-#                    center = x.detach().clone() + offset
-#                    self.loss_func.add_penalty(center, sigma=penalty_width,
-#                                               scale=penalty)
-            L = self.loss_func(res, refs, x, nAtoms=nAtoms,
+            Lfull = self.loss_func(res, refs, nAtoms=nAtoms,
                                weights=weights, include=self.include_loss,
-                               extensive=self.is_extensive)
+                               extensive=self.is_extensive,
+                               x=self.rel_params)
+            L = self.loss_func.raw_loss if raw else Lfull
             dLdx = dLdx + agrad(L, x)[0]
             Ltot = Ltot + L.item()
-        if nfail_tot > 0: print(nfail_tot," molecules not converged.")
-#        self.last_x = x.detach().clone()
         ntot = max(ntot, 1)
-        self.raw_loss = self.loss_func.raw_loss / ntot
         self.individual_loss = self.loss_func.individual_loss / ntot
         Lout, dLdx = Ltot / ntot, dLdx / ntot
-        if k_fail and (nfail_tot > 0): Lout = 1e3 * nfail_tot + self.raw_loss
         return Lout, dLdx.detach().numpy()
         
     

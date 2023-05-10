@@ -196,12 +196,12 @@ class elementwiseSEQM_trainer(ABW):
     """
     def __init__(self, custom_params=[], seqm_settings=None, mode="full",
                  elements=[], use_custom_reference=False, loss_include=[],
-                 loss_type="RSSperAtom", loss_args=(), loss_kwargs={},
-                 SCFfail_penalty=[1e2,1e-3,1e-5]):
+                 loss_type="RSSperAtom", loss_args=(), loss_kwargs={}, 
+                 regularizer={'kind':None}):
         super(elementwiseSEQM_trainer, self).__init__(custom_params=custom_params,
                                 loss_include=loss_include, loss_type=loss_type,
                                 loss_args=loss_args, loss_kwargs=loss_kwargs,
-                                SCFfail_penalty=SCFfail_penalty)
+                                regularizer=regularizer)
         self.core_runner = SEQM_singlepoint_core(seqm_settings, mode=mode,
                                 custom_params=custom_params, elements=elements,
                                 use_custom_reference=use_custom_reference)
@@ -228,8 +228,10 @@ class elementwiseSEQM_trainer(ABW):
         p = torch.stack([p_elm[:,map_i] for map_i in elm_map]).T.to(device)
         species = species.to(device)
         coordinates = coordinates.to(device)
+        self.seqc_params = p
         res, failed = self.core_runner(p, species, coordinates,
                                custom_reference=custom_reference)
+        self.rel_params = self.core_runner.rel_params
         self.results = self.core_runner.results
         return res, failed
         
@@ -259,11 +261,11 @@ class SEQM_trainer(ABW):
     def __init__(self, custom_params=[], seqm_settings=None, mode="full",
                  elements=[], use_custom_reference=False, loss_include=[],
                  loss_type="RSSperAtom", loss_args=(), loss_kwargs={},
-                 SCFfail_penalty=[1e2,1e-3,1e-5]):
+                 regularizer={'kind':None}):
         super(SEQM_trainer, self).__init__(custom_params=custom_params,
                                 loss_include=loss_include, loss_type=loss_type,
                                 loss_args=loss_args, loss_kwargs=loss_kwargs,
-                                SCFfail_penalty=SCFfail_penalty)
+                                regularizer=regularizer)
         self.core_runner = SEQM_singlepoint_core(seqm_settings, mode=mode,
                               custom_params=custom_params, elements=elements,
                               use_custom_reference=use_custom_reference)
@@ -282,8 +284,10 @@ class SEQM_trainer(ABW):
           . custom_reference, torch.Tensor: if in 'delta' mode:
             p = custom_reference + input, default: use standard parameters
         """
+        self.seqc_params = p
         res, failed = self.core_runner(p, species, coordinates,
                                custom_reference=custom_reference)
+        self.rel_params = self.core_runner.rel_params
         self.results = self.core_runner.results
         return res, failed
         
@@ -302,11 +306,11 @@ class AMASE_trainer(ABW):
                  custom_params=None, seqm_settings=None, mode="full", expK=1,
                  elements=[], use_custom_reference=False, loss_include=[],
                  loss_type="RSSperAtom", loss_args=(), loss_kwargs={},
-                 SCFfail_penalty=[1e2,1e-3,1e-5]):
+                 regularizer={'kind':None}):
         super(AMASE_trainer, self).__init__(custom_params=custom_params,
                                 loss_include=loss_include, loss_type=loss_type,
                                 loss_args=loss_args, loss_kwargs=loss_kwargs,
-                                SCFfail_penalty=SCFfail_penalty)
+                                regularizer=regularizer)
         if isinstance(reference_Z, list):
             with torch.no_grad():
                 reference_Z = pad_sequence(reference_Z, batch_first=True)
@@ -325,6 +329,8 @@ class AMASE_trainer(ABW):
     def forward(self, A, species, coordinates, desc, custom_reference=None):
         res, failed = self.core_runner(A, species, coordinates, desc, 
                             expK=self.expK, custom_reference=custom_reference)
+        self.seqc_params = self.core_runner.seqc_params
+        self.rel_params = self.core_runner.rel_params
         self.results = self.core_runner.results
         return res, failed
 

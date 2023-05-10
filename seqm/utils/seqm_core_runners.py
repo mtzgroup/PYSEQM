@@ -124,6 +124,7 @@ class SEQM_singlepoint_core(torch.nn.Module):
             self.results = {}
         
     def full_prediction(self, par, **kwargs):
+        self.rel_params = par.clone()
         return par
     
     def default_delta(self, par, species=None, **kwargs):
@@ -131,10 +132,14 @@ class SEQM_singlepoint_core(torch.nn.Module):
         Zflat = species.reshape(-1)[nondummy]
         p0 = self.default_p[Zflat].transpose(-2,-1).contiguous()
         p0.requires_grad_(False)
+        p0_mask = torch.where(p0.abs()>1e-6, p0, torch.inf)
+        self.rel_params = par / p0_mask
         return par + p0
 
     def custom_delta(self, par, custom_ref=None, **kwargs):
         custom_ref.requires_grad_(False)
+        p0_mask = torch.where(custom_ref.abs()>1e-6, custom_ref, torch.inf)
+        self.rel_params = par / p0_mask
         return par + custom_ref
     
 #    @staticmethod
@@ -146,6 +151,7 @@ class SEQM_singlepoint_core(torch.nn.Module):
         elements = sorted(set([0] + species.reshape(-1).tolist()))
         p_in = self.process_prediction(p, species=species,
                                        reference_par=custom_reference)
+        self.seqc_params = p_in.clone()
         learnedpar = {par:p_in[i] for i, par in enumerate(self.custom_params)}
         self.settings['elements'] = torch.tensor(elements, requires_grad=False)
         self.settings['learned'] = self.custom_params
@@ -264,6 +270,7 @@ class SEQM_multirun_core(torch.nn.Module):
                 self.p0 = custom_reference
         else:
             raise ValueError("Unknown mode '"+mode+"'.")
+        self.p0_mask = torch.where(self.p0.abs()>1e-6, self.p0, torch.inf)
         self.p0.requires_grad_(False)
         self.calc = Energy(settings)
         # get HOMO and LUMO indices
@@ -281,6 +288,7 @@ class SEQM_multirun_core(torch.nn.Module):
         """ Run calculation. """
         # preprocess input according to `mode`
         p_proc = p + self.p0
+        self.rel_params = p / self.p0_mask
         learnedpar = {par:p_proc[i] for i, par in enumerate(self.custom_par)}
         try:
             res = self.calc(self.const, self.xyz, self.Z, learnedpar,

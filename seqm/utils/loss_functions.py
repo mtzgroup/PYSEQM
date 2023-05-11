@@ -27,7 +27,7 @@ def power_reg(x, scale, shift, exponent):
 def well_reg(x, scale, shift, steep):
     n_wall =  1 / ( torch.exp((x+shift) / steep) + 1 )
     p_wall = -1 / ( torch.exp((x-shift) / steep) + 1 )
-    return scale * (n_wall + p_wall)
+    return scale * (1 + n_wall + p_wall).sum()
 
 def get_regularizer_fn(regularizer_dict):
     if regularizer_dict['kind'] is None:

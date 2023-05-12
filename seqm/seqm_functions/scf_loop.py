@@ -427,7 +427,7 @@ def scf_forward2(M, w, gss, gpp, gsp, gp2, hsp, nHydro, nHeavy, nOccMO,
     while(1):
         if notconverged.any():
             EVEC[notconverged] = EMAT[notconverged] + EMAT[notconverged].tril(-1).transpose(1,2)
-            # work-around for in-place operation (neded? more elegant solution?)
+            # work-around for in-place operation (needed? more elegant solution?)
             EVcF = EVEC[notconverged,:cFock,:cFock].clone()
             EVnorm = EVEC[notconverged,counter:(counter+1),counter:(counter+1)].clone()
             EVEC[notconverged,:cFock,:cFock] = EVcF / EVnorm

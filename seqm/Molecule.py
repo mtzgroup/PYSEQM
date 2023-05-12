@@ -53,7 +53,7 @@ class Molecule(torch.nn.Module):
         self.e_mo = None #
         self.e_gap = None #
         
-        self.charges = None
+        self.charge = None
         self.dipole = None
         
         self.Electronic_entropy = None

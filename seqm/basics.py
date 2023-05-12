@@ -80,7 +80,7 @@ class Parser(torch.nn.Module):
         elif ((n_charge%2)==1).any():
             raise ValueError("RHF setting requires closed shell system (even number of electrons)")
         else:
-            nocc = n_charge//2
+            nocc = torch.div(n_charge, 2, rounding_mode='floor')
         
         t1 = (torch.arange(molsize,dtype=torch.int64,device=device)*(molsize+1)).reshape((1,-1))
         t2 = (torch.arange(nmol,dtype=torch.int64,device=device)*molsize**2).reshape((-1,1))
@@ -171,7 +171,7 @@ class Parser_For_Ovr(torch.nn.Module):
         n_charge = torch.sum(tore[species],dim=1).reshape(-1).type(torch.int64)
         if 'charges' in kwargs and torch.is_tensor(kwargs['charges']):
             n_charge += kwargs['charges'].reshape(-1).type(torch.int64)
-        nocc = n_charge//2
+        nocc = torch.div(n_charge, 2, rounding_mode='floor')
 
         if ((n_charge%2)==1).any():
             raise ValueError("Only closed shell system (with even number of electrons) are supported")

@@ -13,13 +13,13 @@ This is a locally-modified development version of [PYSEQM](https://github.com/la
 * Stable and Efficient Extended Lagrangian Born Oppenheimer Molecular Dynamics ([XL-BOMD](https://aip.scitation.org/doi/full/10.1063/1.3148075))
 * Efficient expansion algorithm [SP2](https://journals.aps.org/prb/abstract/10.1103/PhysRevB.66.155115) for generating density matrix
 * THIS VERSION: general, differentiable eigensolver for degenerate molecular orbitals
+* THIS VERSION: much-improved implicit AutoDiff-based SCFbackward
 * THIS VERSION: easy-to-use interface for parameter optimization (alpha)
 * THIS VERSION: kernel-predicted SEQC parameters incl. training routines (alpha)
 
 * **TODO**:
-  - inspect memory spike and potential memory leak when SCF fails
-  - GPU support for training functioning, but non-beneficial for kernel learning (likely due to small model size)
-  - enable parallel training (DistributedDataParallel modules, alternative solution for CPU mode)
+  - implement second derivatives of SCF solver (vanishing in second derivatives of energy)
+  - fix second energy derivative for zeta_s parameter (d^2E/dzeta_s^2)
 
 ## Installation:
 
@@ -36,7 +36,7 @@ pip install git+https://github.com/lanl/PYSEQM.git
 To enable GPU with CUDA, please refer to the Installation Guide on [PyTorch website](https://pytorch.org/)
 
 ## Prerequisites:
-* PyTorch>=1.2
+* PyTorch>=1.9
 
 ## Usage:
 see [```./doc/documentation.md```](./doc/documentation.md)

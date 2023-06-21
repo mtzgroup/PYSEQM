@@ -620,7 +620,7 @@ def fixed_point_anderson(fp_fun, u0, lam=1e-4, beta=1.0):
     if not cond:
         msg = "Anderson solver in SCF backward did not converge for some molecule(s)"
         if RAISE_ERROR_IF_SCF_BACKWARD_FAILS: raise ValueError(msg)
-        print(msg)
+        warnings.warn(msg)
     u_conv = X[:,k%m].view_as(u0)
     return u_conv
     
@@ -749,16 +749,16 @@ class SCF(torch.autograd.Function):
                 #      they are increasing, they are diverging
                 notconverged1 = (grad0_max>backward_eps) + (~torch.isfinite(grad0_max))
                 if notconverged.any():
-                    print("SCF forward       : %d/%d not converged" % (notconverged.sum().item(),nmol))
+                    warnings.warn("SCF forward       : %d/%d not converged" % (notconverged.sum().item(),nmol))
                 if notconverged1.any():
-                    print("SCF backward      : %d/%d not converged" % (notconverged1.sum().item(),nmol))
+                    warnings.warn("SCF backward      : %d/%d not converged" % (notconverged1.sum().item(),nmol))
                     if RAISE_ERROR_IF_SCF_BACKWARD_FAILS:
                         raise ValueError("SCF backward doesn't converged for some molecules")
                 notconverged = notconverged + notconverged1
             
         with torch.no_grad():
             if notconverged.any():
-                print("SCF for/back-ward : %d/%d not converged" % (notconverged.sum().item(),nmol))
+                warnings.warn("SCF for/back-ward : %d/%d not converged" % (notconverged.sum().item(),nmol))
                 cond = notconverged.detach()
                 #M, w, gss, gpp, gsp, gp2, hsp
                 #M shape(nmol*molsizes*molsize, 4, 4)

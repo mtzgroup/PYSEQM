@@ -36,7 +36,7 @@ class Parser(torch.nn.Module):
         """
         Constructor
         """
-        super().__init__()
+        super(Parser, self).__init__()
         self.outercutoff = seqm_parameters['pair_outer_cutoff']
         self.elements = seqm_parameters['elements']
         self.uhf = seqm_parameters.get('UHF', False)
@@ -120,16 +120,16 @@ class Parser(torch.nn.Module):
         # nHeavy, nHydro, nocc : (nmol,)
         # Z, maskd, atom_molid: (natoms, )
         # mask, pair_molid, ni, nj, idxi, idxj, xij, rij ; (npairs, )
-        if not return_mask_l:
-            return nmol, molsize, \
-                nHeavy, nHydro, nocc, \
-                Z, maskd, atom_molid, \
-                mask, pair_molid, ni, nj, idxi, idxj, xij, rij
-        else:
+        if return_mask_l:
             return nmol, molsize, \
                 nHeavy, nHydro, nocc, \
                 Z, maskd, atom_molid, \
                 mask, mask_l, pair_molid, ni, nj, idxi, idxj, xij, rij
+        else:
+            return nmol, molsize, \
+                nHeavy, nHydro, nocc, \
+                Z, maskd, atom_molid, \
+                mask, pair_molid, ni, nj, idxi, idxj, xij, rij
 
 class Parser_For_Ovr(torch.nn.Module):
     """
@@ -139,7 +139,7 @@ class Parser_For_Ovr(torch.nn.Module):
         """
         Constructor
         """
-        super().__init__()
+        super(Parser_For_Ovr, self).__init__()
         self.outercutoff = seqm_parameters['pair_outer_cutoff']
         self.elements = seqm_parameters['elements']
 
@@ -229,7 +229,7 @@ class Pack_Parameters(torch.nn.Module):
         learned : list for parameters will be provided and require grad, e.g. learned = ['U_ss']
         filedir : mopac parameter files directory
         """
-        super().__init__()
+        super(Pack_Parameters, self).__init__()
         self.elements = seqm_parameters['elements']
         self.learned_list = seqm_parameters['learned']
         self.method = seqm_parameters['method']
@@ -261,7 +261,7 @@ class Hamiltonian(torch.nn.Module):
         """
         Constructor
         """
-        super().__init__()
+        super(Hamiltonian, self).__init__()
         #put eps and scf_backward_eps as torch.nn.Parameter such that it is saved with model and can
         #be used to restart jobs
         self.eps = torch.nn.Parameter(torch.as_tensor(seqm_parameters['scf_eps']), requires_grad=False)
@@ -347,8 +347,8 @@ class Energy(torch.nn.Module):
         """
         Constructor
         """
-        super().__init__()
-        self.seqm_parameters =seqm_parameters
+        super(Energy, self).__init__()
+        self.seqm_parameters = seqm_parameters
         self.method = seqm_parameters['method']
         self.parser = Parser(seqm_parameters)
         self.packpar = Pack_Parameters(seqm_parameters)
@@ -455,7 +455,7 @@ class Force(torch.nn.Module):
     get force
     """
     def __init__(self, seqm_parameters):
-        super().__init__()
+        super(Force, self).__init__()
         self.energy = Energy(seqm_parameters)
         self.create_graph = seqm_parameters.get('2nd_grad', False)
         self.uhf = seqm_parameters.get('UHF', False)

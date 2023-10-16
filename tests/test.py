@@ -2,6 +2,7 @@ import torch
 
 from seqm.seqm_functions.constants import Constants, ev_kcalpmol
 from seqm.basics import  Parser, Hamiltonian, Pack_Parameters, Energy
+from seqm.Molecule import Molecule
 from seqm.seqm_functions.parameters import params
 from os import path
 import sys
@@ -26,6 +27,7 @@ else:
 
 species = torch.as_tensor([[1,1],[6,6],[7,7],[8,8]],dtype=torch.int64, device=device) #[:2]
 charges = torch.as_tensor([0.0,0.0,0.0,0.0], dtype=torch.double, device=device) #[:2]
+mult = torch.as_tensor([1,1,1,1], dtype=torch.double, device=device) #[:2]
 
 DX = float(sys.argv[1])
 coordinates = torch.tensor([
@@ -49,17 +51,18 @@ seqm_parameters = {
                    'pair_outer_cutoff' : 1.0e3, # consistent with the unit on coordinates
                    'Hf_flag': False, # true: Hf, false: Etot-Eiso
                    'eig': True,
+                   'UHF': True,
                    #'scf_backward':0,
                    }
 
 
 const = Constants().to(device)
-
+mol = Molecule(const, seqm_parameters, coordinates, species, charges=charges, mult=mult)
 eng = Energy(seqm_parameters).to(device)
-Etot_m_Eiso, Etot, Eelec, Enuc, Eiso, EnucAB, e, P, charge, notconverged = eng(const, coordinates, species, all_terms=True, charges=charges)
+Etot_m_Eiso, Etot, Eelec, Enuc, Eiso, EnucAB, gap, e, P, charge, notconverged = eng(mol, all_terms=True, charges=charges)
 
 print([DX,]+Etot_m_Eiso.numpy().tolist())
 #print([DX,]+Etot_m_Eiso.numpy().tolist()+Etot.numpy().tolist()+Enuc.numpy().tolist())
 #print(Etot_m_Eiso)
-print(e)
-print(torch.diagonal(P, dim1=1, dim2=2))
+print(e.mean(dim=1))
+print(torch.diagonal(P.sum(dim=1), dim1=1, dim2=2))

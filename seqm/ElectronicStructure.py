@@ -56,7 +56,7 @@ class Electronic_Structure(torch.nn.Module):
 
         with torch.no_grad():
             # $$$
-            if molecule.dm.dim() ==4:
+            if molecule.dm.dim() == 4:
                 molecule.q = molecule.const.tore[molecule.species] - self.atomic_charges(molecule.dm[:,0])
                 molecule.q -= self.atomic_charges(molecule.dm[:,1]) # unit +e, i.e. electron: -1.0
             else:

@@ -157,7 +157,11 @@ def scf_forward1(M, w, gss, gpp, gsp, gp2, hsp, nHydro, nHeavy, nOccMO,
     notconverged = torch.ones(nmol,dtype=torch.bool, device=M.device)
     
     k = 0
-    F = fock(nmol, molsize, P, M, maskd, mask, idxi, idxj, w, gss, gpp, gsp, gp2, hsp)
+    if P.dim() == 4:
+        get_fock_mat, uhf, div = fock_u_batch, True, 2
+    else:
+        get_fock_mat, uhf, div = fock, False, 1
+    F = get_fock_mat(nmol, molsize, P, M, maskd, mask, idxi, idxj, w, gss, gpp, gsp, gp2, hsp)
     err = torch.ones(nmol, dtype=P.dtype, device=P.device)
     Pnew = torch.zeros_like(P)
     Pold = torch.zeros_like(P)
@@ -166,14 +170,13 @@ def scf_forward1(M, w, gss, gpp, gsp, gp2, hsp, nHydro, nHeavy, nOccMO,
              .reshape(nmol, 4*molsize, 4*molsize)
     Eelec = elec_energy(P, F, Hcore)
     Eelec_new = torch.zeros_like(Eelec)
-    
     for i in range(nDirect1):
         if notconverged.any():
             if backward:
                 Pnew[notconverged] = sym_eig_trunc1(F[notconverged],
                                                     nHeavy[notconverged],
                                                     nHydro[notconverged],
-                                                    nOccMO[notconverged])[1]
+                                                    nOccMO[notconverged])[1] / div
             elif sp2[0]:
                 Pnew[notconverged] = unpack(
                                             SP2(
@@ -185,14 +188,14 @@ def scf_forward1(M, w, gss, gpp, gsp, gp2, hsp, nHydro, nHeavy, nOccMO,
                 Pnew[notconverged] = sym_eig_trunc(F[notconverged],
                                                    nHeavy[notconverged],
                                                    nHydro[notconverged],
-                                                   nOccMO[notconverged])[1]
+                                                   nOccMO[notconverged])[1] / div
             if backward:
                 Pold = P + 0.0 # ???
                 P = Pnew + 0.0 # ???
             else:
                 Pold[notconverged] = P[notconverged]
                 P[notconverged] = Pnew[notconverged]
-            F = fock(nmol, molsize, P, M, maskd, mask, idxi, idxj, w, gss, gpp, gsp, gp2, hsp)
+            F = get_fock_mat(nmol, molsize, P, M, maskd, mask, idxi, idxj, w, gss, gpp, gsp, gp2, hsp)
             Eelec_new[notconverged] = elec_energy(P[notconverged], F[notconverged], Hcore[notconverged])
             err[notconverged] = torch.abs(Eelec_new[notconverged]-Eelec[notconverged])
             Eelec[notconverged] = Eelec_new[notconverged]
@@ -209,7 +212,7 @@ def scf_forward1(M, w, gss, gpp, gsp, gp2, hsp, nHydro, nHeavy, nOccMO,
             if backward:
                 Pnew[notconverged] = sym_eig_trunc1(F[notconverged],
                              nHeavy[notconverged], nHydro[notconverged],
-                             nOccMO[notconverged])[1]
+                             nOccMO[notconverged])[1] / div
             elif sp2[0]:
                 Pnew[notconverged] = unpack(
                                             SP2(
@@ -220,11 +223,28 @@ def scf_forward1(M, w, gss, gpp, gsp, gp2, hsp, nHydro, nHeavy, nOccMO,
             else:
                 Pnew[notconverged] = sym_eig_trunc(F[notconverged],
                              nHeavy[notconverged], nHydro[notconverged],
-                             nOccMO[notconverged])[1]
+                             nOccMO[notconverged])[1] / div
             if backward:
                 with torch.no_grad():
-                    f = torch.zeros((P.shape[0], 1, 1), dtype=P.dtype, device=P.device)
-                    f[notconverged] = torch.sqrt( torch.sum( (   Pnew[notconverged].diagonal(dim1=1,dim2=2)
+                    if uhf:
+                        f = torch.zeros((P.shape[0], 2, 1, 1), dtype=P.dtype, device=P.device)
+                        f[notconverged,0] = torch.sqrt( torch.sum( (   Pnew[notconverged,0].diagonal(dim1=1,dim2=2)
+                                               - P[notconverged,0].diagonal(dim1=1,dim2=2) \
+                                             )**2, dim=1 ) / \
+                                  torch.sum( (   Pnew[notconverged,0].diagonal(dim1=1,dim2=2)
+                                              - P[notconverged,0].diagonal(dim1=1,dim2=2)*2.0
+                                              + Pold[notconverged,0].diagonal(dim1=1,dim2=2)
+                                          )**2, dim=1 ) ).reshape(-1,1,1)
+                        f[notconverged,1] = torch.sqrt( torch.sum( (   Pnew[notconverged,1].diagonal(dim1=1,dim2=2)
+                                               - P[notconverged,1].diagonal(dim1=1,dim2=2) \
+                                             )**2, dim=1 ) / \
+                                  torch.sum( (   Pnew[notconverged,1].diagonal(dim1=1,dim2=2)
+                                              - P[notconverged,1].diagonal(dim1=1,dim2=2)*2.0
+                                              + Pold[notconverged,1].diagonal(dim1=1,dim2=2)
+                                          )**2, dim=1 ) ).reshape(-1,1,1)
+                    else:
+                        f = torch.zeros((P.shape[0], 1, 1), dtype=P.dtype, device=P.device)
+                        f[notconverged] = torch.sqrt( torch.sum( (   Pnew[notconverged].diagonal(dim1=1,dim2=2)
                                                - P[notconverged].diagonal(dim1=1,dim2=2) \
                                              )**2, dim=1 ) / \
                                   torch.sum( (   Pnew[notconverged].diagonal(dim1=1,dim2=2)
@@ -233,7 +253,24 @@ def scf_forward1(M, w, gss, gpp, gsp, gp2, hsp, nHydro, nHeavy, nOccMO,
                                           )**2, dim=1 ) ).reshape(-1,1,1)
                     fac_register.append(f)
             else:
-                fac = torch.sqrt( torch.sum( (   Pnew[notconverged].diagonal(dim1=1,dim2=2)
+                if uhf:
+                    fac_a = torch.sqrt( torch.sum( (   Pnew[notconverged,0].diagonal(dim1=1,dim2=2)
+                                           - P[notconverged,0].diagonal(dim1=1,dim2=2) \
+                                         )**2, dim=1 ) / \
+                                  torch.sum( (   Pnew[notconverged,0].diagonal(dim1=1,dim2=2)
+                                           - P[notconverged,0].diagonal(dim1=1,dim2=2)*2.0
+                                           + Pold[notconverged,0].diagonal(dim1=1,dim2=2)
+                                         )**2, dim=1 ) ).reshape(-1,1,1)
+                    fac_b = torch.sqrt( torch.sum( (   Pnew[notconverged,1].diagonal(dim1=1,dim2=2)
+                                           - P[notconverged,1].diagonal(dim1=1,dim2=2) \
+                                         )**2, dim=1 ) / \
+                                  torch.sum( (   Pnew[notconverged,1].diagonal(dim1=1,dim2=2)
+                                           - P[notconverged,1].diagonal(dim1=1,dim2=2)*2.0
+                                           + Pold[notconverged,1].diagonal(dim1=1,dim2=2)
+                                         )**2, dim=1 ) ).reshape(-1,1,1)
+                    fac = torch.stack((fac_a,fac_b), dim=1)
+                else:
+                    fac = torch.sqrt( torch.sum( (   Pnew[notconverged].diagonal(dim1=1,dim2=2)
                                            - P[notconverged].diagonal(dim1=1,dim2=2) \
                                          )**2, dim=1 ) / \
                                   torch.sum( (   Pnew[notconverged].diagonal(dim1=1,dim2=2)
@@ -248,7 +285,7 @@ def scf_forward1(M, w, gss, gpp, gsp, gp2, hsp, nHydro, nHeavy, nOccMO,
                 Pold[notconverged] = P[notconverged]
                 P[notconverged] = (1. + fac) * Pnew[notconverged] - fac * P[notconverged]
             
-            F = fock(nmol, molsize, P, M, maskd, mask, idxi, idxj, w, gss, gpp, gsp, gp2, hsp)
+            F = get_fock_mat(nmol, molsize, P, M, maskd, mask, idxi, idxj, w, gss, gpp, gsp, gp2, hsp)
             Eelec_new[notconverged] = elec_energy(P[notconverged], F[notconverged], Hcore[notconverged])
             err[notconverged] = torch.abs(Eelec_new[notconverged]-Eelec[notconverged])
             Eelec[notconverged] = Eelec_new[notconverged]
@@ -270,8 +307,8 @@ def scf_forward2(M, w, gss, gpp, gsp, gp2, hsp, nHydro, nHeavy, nOccMO,
     combine with pulay converger
     #check mopac for which P is stored: P constructed from fock subroutine, or P from pulay algorithm
     """
-    dtype=M.dtype
-    device=M.device
+    dtype = M.dtype
+    device = M.device
     #procedure
     #nDirect1 steps of directly taking new density
     #nAdapt steps of adaptive mixing (start preparing for pulay)
@@ -302,6 +339,8 @@ def scf_forward2(M, w, gss, gpp, gsp, gp2, hsp, nHydro, nHeavy, nOccMO,
     FOCK = torch.zeros_like(FPPF) # store last n=nFock number of Fock matrixes
     notconverged = torch.ones(nmol,dtype=torch.bool, device=M.device)
     k = 0
+    if P.dim() == 4:
+        raise RuntimeError("Adaptive plus Pulay mixing doesn't support UHF yet")
     F = fock(nmol, molsize, P, M, maskd, mask, idxi, idxj, w, gss, gpp, gsp, gp2, hsp)
     err = torch.ones(nmol, dtype=P.dtype, device=P.device)
     Pnew = torch.zeros_like(P)
@@ -494,6 +533,8 @@ def scf_forward3(M, w, gss, gpp, gsp, gp2, hsp, nHydro, nHeavy, nOccMO,
     W = torch.zeros((P.shape[0], P.shape[1], P.shape[2], Rank), dtype=P.dtype, device=P.device)
     
     K0 = 1.0
+    if P.dim() == 4:
+        raise RuntimeError("Krylov Subspace SCF solver doesn't support UHF yet")
     F = fock(nmol, molsize, P, M, maskd, mask, idxi, idxj, w, gss, gpp, gsp, gp2, hsp)
     D, S_Ent, QQ, e, Fe_occ, mu0, Occ_mask = Fermi_Q(F, Temp, nOccMO, nHeavy, nHydro, kB, scf_backward=0)
     dDS = K0 * (D - P)
@@ -826,7 +867,7 @@ def scf_loop(const, molsize, nHeavy, nHydro, nOccMO, \
             .reshape(nmol, 4*molsize, 4*molsize)
         if nOccMO.dim() == 2:
             P = torch.stack((0.5*P, 0.5*P), dim=1)
-            
+    
     #"""
     #scf_backward == 2, directly backward through scf loop
     #             can't reuse P, so put P=None and initial P above
@@ -893,26 +934,26 @@ def scf_loop(const, molsize, nHeavy, nHydro, nOccMO, \
         else:
             e, v = sym_eig_trunc(F, nHeavy, nHydro, nOccMO, eig_only=True)
 
-        #get charge of each orbital on each atom
-        charge = torch.zeros(nmol, molsize*4, molsize, device=e.device, dtype=e.dtype)
-        v2 = [x**2 for x in v]
-        norb = 4 * nHeavy + nHydro
-                
-        if F.dim() == 4: # open shell
-            # $$$
-            for i in range(nmol):
-                q1 = v2[i][0,:norb[i],:(4*nHeavy[i])].reshape(norb[i],4,nHeavy[i]).sum(dim=1)
-                q1 = q1 + v2[i][1,:norb[i],:(4*nHeavy[i])].reshape(norb[i],4,nHeavy[i]).sum(dim=1)
-                charge[i,:norb[i],:nHeavy[i]] = q1
-                q2 = v2[i][0,:norb[i],(4*nHeavy[i]):(4*nHeavy[i]+nHydro[i])]
-                q2 = q2 + v2[i][1,:norb[i],(4*nHeavy[i]):(4*nHeavy[i]+nHydro[i])]
-                charge[i,:norb[i],nHeavy[i]:(nHeavy[i]+nHydro[i])] = q2
-            charge = charge / 2
-        else: # closed shell
-            for i in range(nmol):
-                charge[i,:norb[i],:nHeavy[i]] = v2[i][:norb[i],:(4*nHeavy[i])].reshape(norb[i],4,nHeavy[i]).sum(dim=1)
-                charge[i,:norb[i],nHeavy[i]:(nHeavy[i]+nHydro[i])] = v2[i][:norb[i],(4*nHeavy[i]):(4*nHeavy[i]+nHydro[i])]
-        
+#        #get charge of each orbital on each atom -- WHY???
+#        charge = torch.zeros(nmol, molsize*4, molsize, device=e.device, dtype=e.dtype)
+#        v2 = [x**2 for x in v]
+#        norb = 4 * nHeavy + nHydro
+#                
+#        if F.dim() == 4: # open shell
+#            # $$$
+#            for i in range(nmol):
+#                q1 = v2[i][0,:norb[i],:(4*nHeavy[i])].reshape(norb[i],4,nHeavy[i]).sum(dim=1)
+#                q1 = q1 + v2[i][1,:norb[i],:(4*nHeavy[i])].reshape(norb[i],4,nHeavy[i]).sum(dim=1)
+#                charge[i,:norb[i],:nHeavy[i]] = q1
+#                q2 = v2[i][0,:norb[i],(4*nHeavy[i]):(4*nHeavy[i]+nHydro[i])]
+#                q2 = q2 + v2[i][1,:norb[i],(4*nHeavy[i]):(4*nHeavy[i]+nHydro[i])]
+#                charge[i,:norb[i],nHeavy[i]:(nHeavy[i]+nHydro[i])] = q2
+#            charge = charge / 2
+#        else: # closed shell
+#            for i in range(nmol):
+#                charge[i,:norb[i],:nHeavy[i]] = v2[i][:norb[i],:(4*nHeavy[i])].reshape(norb[i],4,nHeavy[i]).sum(dim=1)
+#                charge[i,:norb[i],nHeavy[i]:(nHeavy[i]+nHydro[i])] = v2[i][:norb[i],(4*nHeavy[i]):(4*nHeavy[i]+nHydro[i])]
+        charge = None
         return F, e, Pconv, Hcore, w, charge, notconverged
     else:
         return F, None, Pconv, Hcore, w, None, notconverged

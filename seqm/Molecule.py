@@ -12,7 +12,7 @@ class Molecule(torch.nn.Module):
             geometry is writted every dump step to the file with name prefix + molid + .xyz
             step, temp, and total energy is print to screens for select molecules every thermo
         """
-        super().__init__(*args, **kwargs)
+        super(Molecule, self).__init__(*args, **kwargs)
         self.const = const
         self.seqm_parameters = seqm_parameters
         self.coordinates = coordinates

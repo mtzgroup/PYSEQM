@@ -1,10 +1,17 @@
 import torch
 from .two_elec_two_center_int_local_frame import two_elec_two_center_int_local_frame as TETCILF
+from .two_elec_two_center_int_local_frame_d_orbitals import two_elec_two_center_int_local_frame_d_orbitals as TETCILFDO
 from .cal_par import *
 from .constants import ev
+import scipy.special
+from .parameters import PWCCT
+from .RotationMatrixD import *
+
 
 #two electron two center integrals
-def two_elec_two_center_int(const,idxi, idxj, ni, nj, xij, rij, Z, zetas, zetap, gss, gpp, gp2, hsp):
+def two_elec_two_center_int(const, idxi, idxj, ni, nj, xij, rij, Z, zetas, zetap, zetad,
+                            zs, zp, zd, gss, gpp, gp2, hsp, F0SD, G2SD,
+                            rho_core, alpha, chi, themethod):
     """
     two electron two center integrals in molecule frame
     """
@@ -21,39 +28,138 @@ def two_elec_two_center_int(const,idxi, idxj, ni, nj, xij, rij, Z, zetas, zetap,
 
     tore = const.tore
     qn = const.qn
-    hpp = 0.5*(gpp-gp2)
-    qn0=qn[Z]
+    qnd = const.qnD_int
+    hpp = 0.5 * (gpp - gp2)
+    hppd =  0.5*(gpp-gp2)
+    ##t0 = time.time()
+    j = 0
+    for i in hpp:
+       if (float(i) < 0.1):
+           hpp[j]= 0.1
+       j = j + 1
+    qn0 = qn[Z]
+    qnd0=qn[Z]
     #Z==0 is for padding zero
     isH = Z==1  # Hydrogen
     isX = Z>2   # Heavy atom
 
-    rho_0=torch.zeros_like(qn0)
-    rho_1=torch.zeros_like(qn0)
-    rho_2=torch.zeros_like(qn0)
-    dd=torch.zeros_like(qn0)
-    qq=torch.zeros_like(qn0)
+    rho_0 = torch.zeros_like(qn0)
+    rho_1 = torch.zeros_like(qn0)
+    rho_2 = torch.zeros_like(qn0)
+    rho_2d=torch.zeros_like(qn0)
+    
+    dd = torch.zeros_like(qn0)
+    qq = torch.zeros_like(qn0)
+    dp=torch.zeros_like(qn0)
+    ds=torch.zeros_like(qn0)
+    dorbdorb=torch.zeros_like(qn0)
+    
     rho1 = additive_term_rho1.apply
     rho2 = additive_term_rho2.apply
 
     dd[isX], qq[isX] = dd_qq(qn0[isX],zetas[isX], zetap[isX])
-    rho_0[isH] = 0.5*ev/gss[isH]
-    rho_0[isX] = 0.5*ev/gss[isX]
-    if torch.sum(isX)>0:
-        rho_1[isX] = rho1(hsp[isX],dd[isX])
-        rho_2[isX] = rho2(hpp[isX],qq[isX])
+    ###Correct coefficients?
+    ### 1/5, 4/15, 3/49, 1 or values from paper?
+    dsAdditiveTerm=torch.zeros_like(qn0)
+    dpAdditiveTerm=torch.zeros_like(qn0)
+    ddAdditiveTerm=torch.zeros_like(qn0)
+    dd0AdditiveTerm=torch.zeros_like(qn0)
+    AIJ52    = torch.zeros_like(qn0)
+    AIJ43    = torch.zeros_like(qn0)
+    AIJ63    = torch.zeros_like(qn0)
+##    AIJ22 = torch.zeros_like(qn0)
 
-    w, e1b, e2a = \
-        rotate(ni, nj, xij, rij, tore, dd[idxi],dd[idxj], \
-               qq[idxi],qq[idxj], \
-               rho_0[idxi],rho_0[idxj], \
-               rho_1[idxi],rho_1[idxj], \
-               rho_2[idxi],rho_2[idxj])
+    dd4 = torch.zeros_like(qn0)
+    dp3 = torch.zeros_like(qn0)
+    i = 0
+    for j in Z:
+        if (j > 20 and j <30) or (j > 38 and j <48) or (j > 70 and j <80) or j == 57:
+#            dsAdditiveTerm[i]   = 1/5*GetSlaterCondonParameter(2,qn0[i],zs[i],qn0[i]-1,zd[i],qn0[i],zs[i],qn0[i]-1,zd[i])
+            dpAdditiveTerm[i]   = (4/15)*GetSlaterCondonParameter(1,qn0[i],zp[i],qn0[i]-1,zd[i],qn0[i],zp[i],qn0[i]-1,zd[i])
+            if (  G2SD[i] > 10**-9):
+                dsAdditiveTerm[i] = 1/5*G2SD[i]
+            else:
+                dsAdditiveTerm[i]   = 1/5*GetSlaterCondonParameter(2,qn0[i],zs[i],qn0[i]-1,zd[i],qn0[i],zs[i],qn0[i]-1,zd[i])
+            ddAdditiveTerm[i]   = (4/49)*GetSlaterCondonParameter(2,qn0[i]-1,zd[i],qn0[i]-1,zd[i],qn0[i]-1,zd[i],qn0[i]-1,zd[i])
+            dd0AdditiveTerm[i]  = GetSlaterCondonParameter(0,qn0[i]-1,zd[i],qn0[i]-1,zd[i],qn0[i]-1,zd[i],qn0[i]-1,zd[i])
+            dd4[i] = GetSlaterCondonParameter(4,qn0[i]-1,zd[i],qn0[i]-1,zd[i],qn0[i]-1,zd[i],qn0[i]-1,zd[i])
+            dp3[i] = 27/245*GetSlaterCondonParameter(3,qn0[i],zp[i],qn0[i]-1,zd[i],qn0[i],zp[i],qn0[i]-1,zd[i])
+            AIJ52[i]    = AIJL(zetap[i],zetad[i],qn0[i],qn0[i]-1,1)
+            AIJ43[i]    = AIJL(zetas[i],zetad[i],qn0[i],qn0[i]-1,2)
+            AIJ63[i]    = AIJL(zetad[i],zetad[i],qn0[i]-1,qn0[i]-1,2)
+        elif (j > 12 and j < 18) or (j > 32 and j < 36) or (j > 50 and j <54):
+            dsAdditiveTerm[i]   = 1/5*GetSlaterCondonParameter(2,qn0[i],zs[i],qn0[i],zd[i],qn0[i],zs[i],qn0[i],zd[i])
+            dpAdditiveTerm[i]   = (4/15)*GetSlaterCondonParameter(1,qn0[i],zp[i],qn0[i],zd[i],qn0[i],zp[i],qn0[i],zd[i])
+            ddAdditiveTerm[i]   = (4/49)*GetSlaterCondonParameter(2,qn0[i],zd[i],qn0[i],zd[i],qn0[i],zd[i],qn0[i],zd[i])
+            dd0AdditiveTerm[i]  = GetSlaterCondonParameter(0,qn0[i],zd[i],qn0[i],zd[i],qn0[i],zd[i],qn0[i],zd[i])
+            dd4[i] = GetSlaterCondonParameter(4,qn0[i],zd[i],qn0[i],zd[i],qn0[i],zd[i],qn0[i],zd[i])
+            dp3[i] = 27/245*GetSlaterCondonParameter(3,qn0[i],zp[i],qn0[i],zd[i],qn0[i],zp[i],qn0[i],zd[i])
+            AIJ52[i]    = AIJL(zetap[i],zetad[i],qn0[i],qn0[i],1)
+            AIJ43[i]    = AIJL(zetas[i],zetad[i],qn0[i],qn0[i],2)
+            AIJ63[i]    = AIJL(zetad[i],zetad[i],qn0[i],qn0[i],2)
+##        AIJ22[i] = AIJL(zetas[i],zetap[i],qn0[i],qn0[i],1)
+        i = i + 1
 
-    return w, e1b, e2a
+    dp = AIJ52 / math.sqrt(5)
+    isY = qnd[Z] > 0
+    D = torch.sqrt(AIJ43*math.sqrt(1.0000/15.0000))*math.sqrt(2.0000)
+    ds = D
+    DS = torch.zeros_like(qn0)
+    DS[isY] = POIJ(2,D[isY],dsAdditiveTerm[isY])
+
+    DD0 = torch.zeros_like(qn0)
+    FG = dd0AdditiveTerm + ddAdditiveTerm + 4/49*dd4
+    FG1 = dd0AdditiveTerm + 0.5*ddAdditiveTerm - 24/441*dd4
+    FG2 = dd0AdditiveTerm - ddAdditiveTerm + 6/441*dd4
+    DD0[isY] = POIJ(0,1.00000,0.20000*(FG[isY]+2.00000*FG1[isY]+2.00000*FG2[isY]))
+
+    D = AIJ52/math.sqrt(5.0000)
+    FG=dpAdditiveTerm+dp3
+    FG1=3/49*245/27*dp3
+    DP = torch.zeros_like(qn0)
+    DP[isY] = POIJ(1,D[isY],FG[isY]-1.8000*FG1[isY])
+    D        = AIJ63/7.0000
+    D        = torch.sqrt(2.0000*D)
+    dorbdorb = D
+    FG= 3/4*ddAdditiveTerm+20/441*dd4
+    FG1=35/441*dd4
+    DD = torch.zeros_like(qn0)
+    DD[isY] = POIJ(2,D[isY],FG[isY]-(20.0000/35.0000)*FG1[isY])
+    rho_0 = 0.5*ev/gss
+
+    rho_1[isX] = rho1(hsp[isX],dd[isX])
+    rho_2[isX] = rho2(hpp[isX],qq[isX])
+    rho_2d[isX] = POIJ(2,qq[isX]*math.sqrt(2),hppd[isX])
+    
+    w, e1b, e2a = rotate(ni, nj, xij, rij,
+                         tore, dd[idxi], dd[idxj], qq[idxi], qq[idxj],
+                         dp[idxi], dp[idxj], ds[idxi], ds[idxj],
+                         dorbdorb[idxi], dorbdorb[idxj],
+                         rho_0[idxi], rho_0[idxj],
+                         rho_1[idxi], rho_1[idxj],
+                         rho_2[idxi],rho_2[idxj],
+                         DD0[idxi]*isY[idxi], DD0[idxj]*isY[idxj],
+                         DP[idxi]*isY[idxi], DP[idxj]*isY[idxj],
+                         DS[idxi]*isY[idxi], DS[idxj]*isY[idxj],
+                         DD[idxi]*isY[idxi], DD[idxj]*isY[idxj],
+                         alpha, themethod, rho_2d[idxi], rho_2d[idxj],
+                         rho_core[idxi], rho_core[idxj])
+
+    rho0aTMP = rho_0[idxi].clone()
+    rho0bTMP = rho_0[idxj].clone()
+    A = (rho_core[idxi] != 0.000)
+    B = (rho_core[idxj] != 0.000)
+
+    rho0aTMP[A] =rho_core[idxi][A]
+    rho0bTMP[B] =rho_core[idxj][B]
+    return w, e1b, e2a,rho0aTMP,rho0bTMP
 
 
 #rotate: rotate the two electron two center integrals from local frame to molecule frame
-def rotate(ni,nj,xij,rij,tore,da,db, qa,qb, rho0a,rho0b, rho1a,rho1b, rho2a,rho2b, cutoff=1.0e10):
+def rotate(ni, nj, xij, rij, tore, da, db, qa, qb, dpa, dpb, dsa, dsb, dda, ddb,
+           rho0a, rho0b, rho1a, rho1b, rho2a, rho2b, rho3a, rho3b, rho4a, rho4b,
+           rho5a, rho5b, rho6a, rho6b, diadia, themethod, rho2ad, rho2bd,
+           rho_corea, rho_coreb, cutoff=1.0e10):
     """
     rotate the two elecron two center integrals from local frame to molecule frame
     """
@@ -91,36 +197,45 @@ def rotate(ni,nj,xij,rij,tore,da,db, qa,qb, rho0a,rho0b, rho1a,rho1b, rho2a,rho2
     #xij = xij0/torch.norm(xij,dim=1,keepdim=True)
 
     #enuc is not computed at this moment
+    YH = (((ni > 12) & (ni <18)) | ((ni > 20) & (ni <30)) | ((ni > 32) & (ni <36)) | ((ni > 38) & (ni <48)) | ((ni > 50) & (ni <54)) | ((ni > 70) & (ni <80)) | (ni ==57))  & (nj==1)
+    YX = (((ni > 12) & (ni <18)) | ((ni > 20) & (ni <30)) | ((ni > 32) & (ni <36)) | ((ni > 38) & (ni <48)) | ((ni > 50) & (ni <54)) | ((ni > 70) & (ni <80)) | (ni ==57)) & \
+         ((nj <= 12) | ((nj >= 18) & (nj <=20)) | ((nj >= 30) & (nj <= 32)) | ((nj >= 36) & (nj <= 38)) | ((nj >= 48) & (nj <= 50)) | ((nj >= 54) & (nj <= 56)) | ((nj >= 80) & (nj <= 83))) & (nj !=1)
+    YY = (((ni > 12) & (ni <18)) | ((ni > 20) & (ni <30)) | ((ni > 32) & (ni <36)) | ((ni > 38) & (ni <48)) | ((ni > 50) & (ni <54)) | ((ni > 70) & (ni <80)) | (ni ==57)) &\
+         (((nj > 12) & (nj <18)) | ((nj > 20) & (nj <30)) | ((nj > 32) & (nj <36)) | ((nj > 38) & (nj <48)) | ((nj > 50) & (nj <54)) | ((nj > 70) & (nj <80)) | (nj ==57))
+
     HH = (ni==1) & (nj==1)
     XH = (ni>1) & (nj==1)
     XX = (ni>1) & (nj>1)
 
-    #rij = torch.where(rij>cutoff, torch.tensor(cutoff,dtype=dtype),rij)
-    #ni>=nj
-    #
-    #w[1] (s s/s s)
-    #wHH = ri[1]
-
-    #riHH, riXH, ri, coreHH, coreXH, core = \
     wHH, riXH, ri, coreHH, coreXH, core = \
            TETCILF(ni,nj,rij, tore, \
-                da, db, qa,qb, rho0a,rho0b, rho1a,rho1b, rho2a,rho2b)
+                da, db, qa,qb, rho0a,rho0b, rho1a,rho1b, rho2a,rho2b,themethod)
+    riXHPM6 = riXH.clone()
+    riPM6a = ri.clone()
+    riPM6b = ri.clone()
     
-    #print(wHH)
-    #print(riXH)
-    #print(ri)
-    #
+    if (rho_corea.sum() > 0 or rho_coreb.sum() > 0 ):
+       rho0aTMP = rho0a.clone()
+       rho0bTMP = rho0b.clone()
+       A = (rho_corea != 0.000)
+       B = (rho_coreb != 0.000)
 
-    ###############################33
-    # X-H hevay atom - Hydrogen
-    xXH=-xij[XH]
-    yXH=torch.zeros(xXH.shape[0],2,dtype=dtype, device=device)
-    zXH=torch.zeros_like(xXH)
-    #cond1 = torch.abs(xXH[...,3-1])>0.99999999
-    #xXH[...,3-1] = torch.where(xXH[...,3-1]>0.99999999, torch.tensor([1.0],dtype=dtype, xXH[...,3-1]))
-    #xXH[...,3-1] = torch.where(xXH[...,3-1]<-0.99999999, torch.tensor([-1.0],dtype=dtype, xXH[...,3-1]))
-    #zXH[...,3-1] = torch,where(cond1, torch.tensor([0.0],dtype=dtype),
-    #                           torch.sqrt(1.0-xXH[...,3-1]**2))
+       rho0aTMP[A] =rho_corea[A]
+       rho0bTMP[B] =rho_coreb[B]
+       trash, riXHPM6, riPM6b, notneeded, dont, need = \
+           TETCILF(ni,nj,rij, tore, \
+                da, db, qa,qb, rho0a,rho0bTMP, rho1a,rho1b, rho2a,rho2b,themethod)
+
+
+       trash, riXHPM6, riPM6a, notneeded, dont, need = \
+           TETCILF(ni,nj,rij, tore, \
+                da, db, qa,qb, rho0aTMP,rho0b, rho1a,rho1b, rho2a,rho2b,themethod)    
+
+    ###############################
+    # X-H heavy atom - Hydrogen
+    xXH = -xij[XH]
+    yXH = torch.zeros(xXH.shape[0],2,dtype=dtype, device=device)
+    zXH = torch.zeros_like(xXH)
     """
     pytorch new version doesn't support modify z and z depends on a , a depends on z
     zXH[...,3-1] =  torch.sqrt(1.0-xXH[...,3-1]**2)
@@ -211,14 +326,9 @@ def rotate(ni,nj,xij,rij,tore,da,db, qa,qb, rho0a,rho0b, rho1a,rho1b, rho2a,rho2
 
     ##############################################
     # X-X heavy atom - heavy atom
-    x=-xij[XX]
-    y=torch.zeros(x.shape[0],2,dtype=dtype, device=device)
-    #z=torch.zeros_like(x)
-    #cond1 = torch.abs(x[...,3-1])>0.99999999
-    #x[...,3-1] = torch.where(x[...,3-1]>0.99999999, torch.tensor([1.0],dtype=dtype, x[...,3-1]))
-    #x[...,3-1] = torch.where(x[...,3-1]<-0.99999999, torch.tensor([-1.0],dtype=dtype, x[...,3-1]))
-    #z[...,3-1] = torch,where(cond1, torch.tensor([0.0],dtype=dtype),
-    #                           torch.sqrt(1.0-x[...,3-1]**2))
+    K = XX | YX | YY
+    x = -xij[K]
+    y = torch.zeros(x.shape[0],2,dtype=dtype, device=device)
     """
     #not working in the new version as a depends on z
     z[...,3-1] =  torch.sqrt(1.0-x[...,3-1]**2)
@@ -249,14 +359,6 @@ def rotate(ni,nj,xij,rij,tore,da,db, qa,qb, rho0a,rho0b, rho1a,rho1b, rho2a,rho2
 
     z = torch.stack((z0,z1,z2),dim=1)
 
-    #y[...,1-1]=0.0
-    #y[cond1XX,0] =  a*x[cond1XX,2-1] * \
-    #                  torch.where( x[cond1XX,1-1]>=0.0, \
-    #                               torch.tensor(-1.0,dtype=dtype, device=device), \
-    #                               torch.tensor(1.0,dtype=dtype, device=device) )
-    #y[cond1XX,1-1] = -a*x[cond1XX,2-1]
-    #y[x[...,1-1]<0.0,1-1] *= -1.0
-
     y[...,1-1]=0.0
     cond1XX_X1g0 = cond1XX & ( x[...,1-1]>=0.0 )
     cond1XX_X1l0 = cond1XX & ( x[...,1-1]<0.0 )
@@ -264,11 +366,8 @@ def rotate(ni,nj,xij,rij,tore,da,db, qa,qb, rho0a,rho0b, rho1a,rho1b, rho2a,rho2
     y[cond1XX_X1l0,1-1] = (1.0/z2[cond1XX_X1l0])*x[cond1XX_X1l0,2-1]
 
 
-
     y[...,2-1]=1.0
     y[cond1XX,2-1] = torch.abs(a * x[cond1XX,1-1])
-    #y[3] is not used
-
 
     xx11 = x[...,1-1]**2
     xx21 = x[...,2-1]*x[...,1-1]
@@ -704,140 +803,16 @@ def rotate(ni,nj,xij,rij,tore,da,db, qa,qb, rho0a,rho0b, rho1a,rho1b, rho2a,rho2
        (ri[...,16-1]*xx33 + ri[...,17-1]*zz33 ) * xx33 \
        + (ri[...,18-1]*xx33 + ri[...,19-1]*zz33 ) * zz33 \
        + ri[...,20-1]*xz33*xz33
-    #
-    """
-    #
-    css1,csp1,cpps1,cppp1 = core[1:,1]
-    css2,csp2,cpps2,cppp2 = core[1:,2]
-    e1b[1] = -css1
-    #if(natorb(ni).eq.4) then
-    if ni>1:
-        # currently only s and p orbitals
-        e1b[2] = -csp1 *x[1]
-        e1b[3] = -cpps1*xx11-cppp1*yyzz11
-        e1b[4] = -csp1 *x[2]
-        e1b[5] = -cpps1*xx21-cppp1*yyzz21
-        e1b[6] = -cpps1*xx22-cppp1*yyzz22
-        e1b[7] = -csp1 *x[3]
-        e1b[8] = -cpps1*xx31-cppp1*zz31
-        e1b[9] = -cpps1*xx32-cppp1*zz32
-        e1b[10] = -cpps1*xx33-cppp1*zz33
-
-    e2a[1] = -css2
-    #if(natorb(nj).eq.4) then
-    if nj>1:
-        e2a[2] = -csp2 *x[1]
-        e2a[3] = -cpps2*xx11-cppp2*yyzz11
-        e2a[4] = -csp2 *x[2]
-        e2a[5] = -cpps2*xx21-cppp2*yyzz21
-        e2a[6] = -cpps2*xx22-cppp2*yyzz22
-        e2a[7] = -csp2 *x[3]
-        e2a[8] = -cpps2*xx31-cppp2*zz31
-        e2a[9] = -cpps2*xx32-cppp2*zz32
-        e2a[10] = -cpps2*xx33-cppp2*zz33
-    """
-    """
-    e1bHH = -coreHH[...,0]
-    e2aHH = -coreHH[...,1]
-
-    e1bXH = torch.zeros(coreXH.shape[0],10,dtype=dtype, device=device)
-    e1bXH[...,1-1] = -coreXH[...,0]
-    e1bXH[...,2-1] = -coreXH[...,1]*xXH[...,1-1]
-    e1bXH[...,3-1] = -coreXH[...,2]*xx11XH - coreXH[...,3]*yyzz11XH
-    e1bXH[...,4-1] = -coreXH[...,1]*xXH[...,2-1]
-    e1bXH[...,5-1] = -coreXH[...,2]*xx21XH - coreXH[...,3]*yyzz21XH
-    e1bXH[...,6-1] = -coreXH[...,2]*xx22XH - coreXH[...,3]*yyzz22XH
-    e1bXH[...,7-1] = -coreXH[...,1]*xXH[...,3-1]
-    e1bXH[...,8-1] = -coreXH[...,2]*xx31XH - coreXH[...,3]*zz31XH
-    e1bXH[...,9-1] = -coreXH[...,2]*xx32XH - coreXH[...,3]*zz32XH
-    e1bXH[...,10-1] = -coreXH[...,2]*xx33XH - coreXH[...,3]*zz33XH
-    e2aXH = -coreXH[...,4]
-
-    e1b = torch.zeros(core.shape[0],10,dtype=dtype, device=device)
-    e2a = torch.zeros_like(e1b)
-    e1b[...,1-1] = -core[...,0]
-    e1b[...,2-1] = -core[...,1]*x[...,1-1]
-    e1b[...,3-1] = -core[...,2]*xx11 - core[...,3]*yyzz11
-    e1b[...,4-1] = -core[...,1]*x[...,2-1]
-    e1b[...,5-1] = -core[...,2]*xx21 - core[...,3]*yyzz21
-    e1b[...,6-1] = -core[...,2]*xx22 - core[...,3]*yyzz22
-    e1b[...,7-1] = -core[...,1]*x[...,3-1]
-    e1b[...,8-1] = -core[...,2]*xx31 - core[...,3]*zz31
-    e1b[...,9-1] = -core[...,2]*xx32 - core[...,3]*zz32
-    e1b[...,10-1] = -core[...,2]*xx33 - core[...,3]*zz33
-
-    e2a[...,1-1] = -core[...,4]
-    e2a[...,2-1] = -core[...,5]*x[...,1-1]
-    e2a[...,3-1] = -core[...,6]*xx11 - core[...,7]*yyzz11
-    e2a[...,4-1] = -core[...,5]*x[...,2-1]
-    e2a[...,5-1] = -core[...,6]*xx21 - core[...,7]*yyzz21
-    e2a[...,6-1] = -core[...,6]*xx22 - core[...,7]*yyzz22
-    e2a[...,7-1] = -core[...,5]*x[...,3-1]
-    e2a[...,8-1] = -core[...,6]*xx31 - core[...,7]*zz31
-    e2a[...,9-1] = -core[...,6]*xx32 - core[...,7]*zz32
-    e2a[...,10-1] = -core[...,6]*xx33 - core[...,7]*zz33
-
-    return wHH, e1bHH, e2aHH, wXH, e1bXH, e2aXH, w, e1b, e2a
-    """
+    
     #combine w, e1b, e2a
-
-
-
 
     # as index_add_ is used later, which is slow, so
     # change e1b, e2a to shape (npairs, 4,4), only need to do index_add once
-    """
-    e1b = torch.zeros(rij.shape[0],10,dtype=dtype, device=device)
-    e2a = torch.zeros_like(e1b)
-
-    e1b[HH,0] = -coreHH[...,0]
-    e2a[HH,0] = -coreHH[...,1]
-
-    #e1bXH = torch.zeros(coreXH.shape[0],10,dtype=dtype, device=device)
-    e1b[XH,1-1] = -coreXH[...,0]
-    e1b[XH,2-1] = -coreXH[...,1]*xXH[...,1-1]
-    e1b[XH,3-1] = -coreXH[...,2]*xx11XH - coreXH[...,3]*yyzz11XH
-    e1b[XH,4-1] = -coreXH[...,1]*xXH[...,2-1]
-    e1b[XH,5-1] = -coreXH[...,2]*xx21XH - coreXH[...,3]*yyzz21XH
-    e1b[XH,6-1] = -coreXH[...,2]*xx22XH - coreXH[...,3]*yyzz22XH
-    e1b[XH,7-1] = -coreXH[...,1]*xXH[...,3-1]
-    e1b[XH,8-1] = -coreXH[...,2]*xx31XH - coreXH[...,3]*zz31XH
-    e1b[XH,9-1] = -coreXH[...,2]*xx32XH - coreXH[...,3]*zz32XH
-    e1b[XH,10-1] = -coreXH[...,2]*xx33XH - coreXH[...,3]*zz33XH
-    e2a[XH,0] = -coreXH[...,4]
-
-    #e1b = torch.zeros(core.shape[0],10,dtype=dtype, device=device)
-    #e2a = torch.zeros_like(e1b)
-    e1b[XX,1-1] = -core[...,0]
-    e1b[XX,2-1] = -core[...,1]*x[...,1-1]
-    e1b[XX,3-1] = -core[...,2]*xx11 - core[...,3]*yyzz11
-    e1b[XX,4-1] = -core[...,1]*x[...,2-1]
-    e1b[XX,5-1] = -core[...,2]*xx21 - core[...,3]*yyzz21
-    e1b[XX,6-1] = -core[...,2]*xx22 - core[...,3]*yyzz22
-    e1b[XX,7-1] = -core[...,1]*x[...,3-1]
-    e1b[XX,8-1] = -core[...,2]*xx31 - core[...,3]*zz31
-    e1b[XX,9-1] = -core[...,2]*xx32 - core[...,3]*zz32
-    e1b[XX,10-1] = -core[...,2]*xx33 - core[...,3]*zz33
-
-    e2a[XX,1-1] = -core[...,4]
-    e2a[XX,2-1] = -core[...,5]*x[...,1-1]
-    e2a[XX,3-1] = -core[...,6]*xx11 - core[...,7]*yyzz11
-    e2a[XX,4-1] = -core[...,5]*x[...,2-1]
-    e2a[XX,5-1] = -core[...,6]*xx21 - core[...,7]*yyzz21
-    e2a[XX,6-1] = -core[...,6]*xx22 - core[...,7]*yyzz22
-    e2a[XX,7-1] = -core[...,5]*x[...,3-1]
-    e2a[XX,8-1] = -core[...,6]*xx31 - core[...,7]*zz31
-    e2a[XX,9-1] = -core[...,6]*xx32 - core[...,7]*zz32
-    e2a[XX,10-1] = -core[...,6]*xx33 - core[...,7]*zz33
-    """
-
     e1b = torch.zeros((rij.shape[0],4,4),dtype=dtype, device=device)
     e2a = torch.zeros_like(e1b)
-
     e1b[HH,0,0] = -coreHH[...,0]
     e2a[HH,0,0] = -coreHH[...,1]
 
-    #e1bXH = torch.zeros(coreXH.shape[0],10,dtype=dtype, device=device)
     e1b[XH,0,0] = -coreXH[...,0]
     e1b[XH,0,1] = -coreXH[...,1]*xXH[...,1-1]
     e1b[XH,1,1] = -coreXH[...,2]*xx11XH - coreXH[...,3]*yyzz11XH
@@ -850,8 +825,6 @@ def rotate(ni,nj,xij,rij,tore,da,db, qa,qb, rho0a,rho0b, rho1a,rho1b, rho2a,rho2
     e1b[XH,3,3] = -coreXH[...,2]*xx33XH - coreXH[...,3]*zz33XH
     e2a[XH,0,0] = -coreXH[...,4]
 
-    #e1b = torch.zeros(core.shape[0],10,dtype=dtype, device=device)
-    #e2a = torch.zeros_like(e1b)
     e1b[XX,0,0] = -core[...,0]
     e1b[XX,0,1] = -core[...,1]*x[...,1-1]
     e1b[XX,1,1] = -core[...,2]*xx11 - core[...,3]*yyzz11
@@ -873,11 +846,289 @@ def rotate(ni,nj,xij,rij,tore,da,db, qa,qb, rho0a,rho0b, rho1a,rho1b, rho2a,rho2
     e2a[XX,1,3] = -core[...,6]*xx31 - core[...,7]*zz31
     e2a[XX,2,3] = -core[...,6]*xx32 - core[...,7]*zz32
     e2a[XX,3,3] = -core[...,6]*xx33 - core[...,7]*zz33
+    
+    if themethod == "PM6":
+        dRotationMatrix = GenerateRotationMatrix(xij)
+        riYH, riYX, riYY, coreYH, coreYX, coreYY = \
+                TETCILFDO(ni,nj,rij, tore, \
+                da, db, qa,qb, dpa, dpb, dsa, dsb, dda, ddb, \
+                rho0a,rho0b, rho1a,rho1b, rho2ad,rho2bd, rho3a,rho3b, rho4a,rho4b, rho5a,rho5b, rho6a,rho6b, diadia, themethod, dRotationMatrix,ri,riXH,rho_corea,rho_coreb, riXHPM6,riPM6a, riPM6b)
+        
+        e1bD = torch.zeros((rij.shape[0],9,9),dtype=dtype, device=device)
+        e2aD = torch.zeros_like(e1bD)
+        e1bD[ HH | XH | XX, :4, :4] = e2a
+        e2aD[ HH | XH | XX, :4, :4] = e1b
 
+        ########## YH ##########
+        e1bD[YH,0,0] = -coreYH[...,0]
+        e2aD[YH,0,0] = -coreYH[...,1]
+        e2aD[YH,0,1] = -coreYH[...,2]
+        e2aD[YH,1,1] = -coreYH[...,3]
+        e2aD[YH,0,2] = -coreYH[...,4]
+        e2aD[YH,1,2] = -coreYH[...,5]
+        e2aD[YH,2,2] = -coreYH[...,6]
+        e2aD[YH,0,3] = -coreYH[...,7]
+        e2aD[YH,1,3] = -coreYH[...,8]
+        e2aD[YH,2,3] = -coreYH[...,9]
+        e2aD[YH,3,3] = -coreYH[...,10]
+        e2aD[YH,0,4] = -coreYH[...,11]
+        e2aD[YH,1,4] = -coreYH[...,12]
+        e2aD[YH,2,4] = -coreYH[...,13]
+        e2aD[YH,3,4] = -coreYH[...,14]
+        e2aD[YH,4,4] = -coreYH[...,15]
+        e2aD[YH,0,5] = -coreYH[...,16]
+        e2aD[YH,1,5] = -coreYH[...,17]
+        e2aD[YH,2,5] = -coreYH[...,18]
+        e2aD[YH,3,5] = -coreYH[...,19]
+        e2aD[YH,4,5] = -coreYH[...,20]
+        e2aD[YH,5,5] = -coreYH[...,21]
+        e2aD[YH,0,6] = -coreYH[...,22]
+        e2aD[YH,1,6] = -coreYH[...,23]
+        e2aD[YH,2,6] = -coreYH[...,24]
+        e2aD[YH,3,6] = -coreYH[...,25]
+        e2aD[YH,4,6] = -coreYH[...,26]
+        e2aD[YH,5,6] = -coreYH[...,27]
+        e2aD[YH,6,6] = -coreYH[...,28]
+        e2aD[YH,0,7] = -coreYH[...,29]
+        e2aD[YH,1,7] = -coreYH[...,30]
+        e2aD[YH,2,7] = -coreYH[...,31]
+        e2aD[YH,3,7] = -coreYH[...,32]
+        e2aD[YH,4,7] = -coreYH[...,33]
+        e2aD[YH,5,7] = -coreYH[...,34]
+        e2aD[YH,6,7] = -coreYH[...,35]
+        e2aD[YH,7,7] = -coreYH[...,36]
+        e2aD[YH,0,8] = -coreYH[...,37]
+        e2aD[YH,1,8] = -coreYH[...,38]
+        e2aD[YH,2,8] = -coreYH[...,39]
+        e2aD[YH,3,8] = -coreYH[...,40]
+        e2aD[YH,4,8] = -coreYH[...,41]
+        e2aD[YH,5,8] = -coreYH[...,42]
+        e2aD[YH,6,8] = -coreYH[...,43]
+        e2aD[YH,7,8] = -coreYH[...,44]
+        e2aD[YH,8,8] = -coreYH[...,45]
 
+        ########## YX ##########
+        e1bD[YX,0,0] = -coreYX[...,0]
+        e1bD[YX,0,1] = -coreYX[...,1]
+        e1bD[YX,1,1] = -coreYX[...,2]
+        e1bD[YX,0,2] = -coreYX[...,3]
+        e1bD[YX,1,2] = -coreYX[...,4]
+        e1bD[YX,2,2] = -coreYX[...,5]
+        e1bD[YX,0,3] = -coreYX[...,6]
+        e1bD[YX,1,3] = -coreYX[...,7]
+        e1bD[YX,2,3] = -coreYX[...,8]
+        e1bD[YX,3,3] = -coreYX[...,9]
+        e2aD[YX,0,0] = -coreYX[...,10]
+        e2aD[YX,0,1] = -coreYX[...,11]
+        e2aD[YX,1,1] = -coreYX[...,12]
+        e2aD[YX,0,2] = -coreYX[...,13]
+        e2aD[YX,1,2] = -coreYX[...,14]
+        e2aD[YX,2,2] = -coreYX[...,15]
+        e2aD[YX,0,3] = -coreYX[...,16]
+        e2aD[YX,1,3] = -coreYX[...,17]
+        e2aD[YX,2,3] = -coreYX[...,18]
+        e2aD[YX,3,3] = -coreYX[...,19]
+        e2aD[YX,0,4] = -coreYX[...,20]
+        e2aD[YX,1,4] = -coreYX[...,21]
+        e2aD[YX,2,4] = -coreYX[...,22]
+        e2aD[YX,3,4] = -coreYX[...,23]
+        e2aD[YX,4,4] = -coreYX[...,24]
+        e2aD[YX,0,5] = -coreYX[...,25]
+        e2aD[YX,1,5] = -coreYX[...,26]
+        e2aD[YX,2,5] = -coreYX[...,27]
+        e2aD[YX,3,5] = -coreYX[...,28]
+        e2aD[YX,4,5] = -coreYX[...,29]
+        e2aD[YX,5,5] = -coreYX[...,30]
+        e2aD[YX,0,6] = -coreYX[...,31]
+        e2aD[YX,1,6] = -coreYX[...,32]
+        e2aD[YX,2,6] = -coreYX[...,33]
+        e2aD[YX,3,6] = -coreYX[...,34]
+        e2aD[YX,4,6] = -coreYX[...,35]
+        e2aD[YX,5,6] = -coreYX[...,36]
+        e2aD[YX,6,6] = -coreYX[...,37]
+        e2aD[YX,0,7] = -coreYX[...,38]
+        e2aD[YX,1,7] = -coreYX[...,39]
+        e2aD[YX,2,7] = -coreYX[...,40]
+        e2aD[YX,3,7] = -coreYX[...,41]
+        e2aD[YX,4,7] = -coreYX[...,42]
+        e2aD[YX,5,7] = -coreYX[...,43]
+        e2aD[YX,6,7] = -coreYX[...,44]
+        e2aD[YX,7,7] = -coreYX[...,45]
+        e2aD[YX,0,8] = -coreYX[...,46]
+        e2aD[YX,1,8] = -coreYX[...,47]
+        e2aD[YX,2,8] = -coreYX[...,48]
+        e2aD[YX,3,8] = -coreYX[...,49]
+        e2aD[YX,4,8] = -coreYX[...,50]
+        e2aD[YX,5,8] = -coreYX[...,51]
+        e2aD[YX,6,8] = -coreYX[...,52]
+        e2aD[YX,7,8] = -coreYX[...,53]
+        e2aD[YX,8,8] = -coreYX[...,54]
+        ########## YY ##########
+        e2aD[YY,0,0] = -coreYY[...,0]
+        e2aD[YY,0,1] = -coreYY[...,1]
+        e2aD[YY,1,1] = -coreYY[...,2]
+        e2aD[YY,0,2] = -coreYY[...,3]
+        e2aD[YY,1,2] = -coreYY[...,4]
+        e2aD[YY,2,2] = -coreYY[...,5]
+        e2aD[YY,0,3] = -coreYY[...,6]
+        e2aD[YY,1,3] = -coreYY[...,7]
+        e2aD[YY,2,3] = -coreYY[...,8]
+        e2aD[YY,3,3] = -coreYY[...,9]
+        e2aD[YY,0,4] = -coreYY[...,10]
+        e2aD[YY,1,4] = -coreYY[...,11]
+        e2aD[YY,2,4] = -coreYY[...,12]
+        e2aD[YY,3,4] = -coreYY[...,13]
+        e2aD[YY,4,4] = -coreYY[...,14]
+        e2aD[YY,0,5] = -coreYY[...,15]
+        e2aD[YY,1,5] = -coreYY[...,16]
+        e2aD[YY,2,5] = -coreYY[...,17]
+        e2aD[YY,3,5] = -coreYY[...,18]
+        e2aD[YY,4,5] = -coreYY[...,19]
+        e2aD[YY,5,5] = -coreYY[...,20]
+        e2aD[YY,0,6] = -coreYY[...,21]
+        e2aD[YY,1,6] = -coreYY[...,22]
+        e2aD[YY,2,6] = -coreYY[...,23]
+        e2aD[YY,3,6] = -coreYY[...,24]
+        e2aD[YY,4,6] = -coreYY[...,25]
+        e2aD[YY,5,6] = -coreYY[...,26]
+        e2aD[YY,6,6] = -coreYY[...,27]
+        e2aD[YY,0,7] = -coreYY[...,28]
+        e2aD[YY,1,7] = -coreYY[...,29]
+        e2aD[YY,2,7] = -coreYY[...,30]
+        e2aD[YY,3,7] = -coreYY[...,31]
+        e2aD[YY,4,7] = -coreYY[...,32]
+        e2aD[YY,5,7] = -coreYY[...,33]
+        e2aD[YY,6,7] = -coreYY[...,34]
+        e2aD[YY,7,7] = -coreYY[...,35]
+        e2aD[YY,0,8] = -coreYY[...,36]
+        e2aD[YY,1,8] = -coreYY[...,37]
+        e2aD[YY,2,8] = -coreYY[...,38]
+        e2aD[YY,3,8] = -coreYY[...,39]
+        e2aD[YY,4,8] = -coreYY[...,40]
+        e2aD[YY,5,8] = -coreYY[...,41]
+        e2aD[YY,6,8] = -coreYY[...,42]
+        e2aD[YY,7,8] = -coreYY[...,43]
+        e2aD[YY,8,8] = -coreYY[...,44]
+        e1bD[YY,0,0] = -coreYY[...,45]
+        e1bD[YY,0,1] = -coreYY[...,46]
+        e1bD[YY,1,1] = -coreYY[...,47]
+        e1bD[YY,0,2] = -coreYY[...,48]
+        e1bD[YY,1,2] = -coreYY[...,49]
+        e1bD[YY,2,2] = -coreYY[...,50]
+        e1bD[YY,0,3] = -coreYY[...,51]
+        e1bD[YY,1,3] = -coreYY[...,52]
+        e1bD[YY,2,3] = -coreYY[...,53]
+        e1bD[YY,3,3] = -coreYY[...,54]
+        e1bD[YY,0,4] = -coreYY[...,55]
+        e1bD[YY,1,4] = -coreYY[...,56]
+        e1bD[YY,2,4] = -coreYY[...,57]
+        e1bD[YY,3,4] = -coreYY[...,58]
+        e1bD[YY,4,4] = -coreYY[...,59]
+        e1bD[YY,0,5] = -coreYY[...,60]
+        e1bD[YY,1,5] = -coreYY[...,61]
+        e1bD[YY,2,5] = -coreYY[...,62]
+        e1bD[YY,3,5] = -coreYY[...,63]
+        e1bD[YY,4,5] = -coreYY[...,64]
+        e1bD[YY,5,5] = -coreYY[...,65]
+        e1bD[YY,0,6] = -coreYY[...,66]
+        e1bD[YY,1,6] = -coreYY[...,67]
+        e1bD[YY,2,6] = -coreYY[...,68]
+        e1bD[YY,3,6] = -coreYY[...,69]
+        e1bD[YY,4,6] = -coreYY[...,70]
+        e1bD[YY,5,6] = -coreYY[...,71]
+        e1bD[YY,6,6] = -coreYY[...,72]
+        e1bD[YY,0,7] = -coreYY[...,73]
+        e1bD[YY,1,7] = -coreYY[...,74]
+        e1bD[YY,2,7] = -coreYY[...,75]
+        e1bD[YY,3,7] = -coreYY[...,76]
+        e1bD[YY,4,7] = -coreYY[...,77]
+        e1bD[YY,5,7] = -coreYY[...,78]
+        e1bD[YY,6,7] = -coreYY[...,79]
+        e1bD[YY,7,7] = -coreYY[...,80]
+        e1bD[YY,0,8] = -coreYY[...,81]
+        e1bD[YY,1,8] = -coreYY[...,82]
+        e1bD[YY,2,8] = -coreYY[...,83]
+        e1bD[YY,3,8] = -coreYY[...,84]
+        e1bD[YY,4,8] = -coreYY[...,85]
+        e1bD[YY,5,8] = -coreYY[...,86]
+        e1bD[YY,6,8] = -coreYY[...,87]
+        e1bD[YY,7,8] = -coreYY[...,88]
+        e1bD[YY,8,8] = -coreYY[...,89]
+        
+        wc = torch.zeros(rij.shape[0],45,45,dtype=dtype, device=device)
+        wc[YH,0,:45] = riYH
+        wc[YX,:10,:45] = riYX.reshape((-1,10,45))
+        wc[YY] = riYY.reshape((-1,45,45))
+        
+        wc[HH,0,0] = wHH
+        wc[XH,:10,0] = wXH
+        wc[XX,:10,:10] = w.reshape((-1,10,10))
+        
+        KK = YH | YX | YY
+        wcRotated = wc.clone()
+        wcRotated[~KK,...,...] = torch.transpose(wc[~KK,...,...],1,2)
+        wcRotated[KK,...,...] = Rotate2Center2Electron(wc[KK,...,...], dRotationMatrix[KK,...,...])
+        
+        return wcRotated, e1bD, e2aD
+    
     wc  = torch.zeros(rij.shape[0],10,10,dtype=dtype, device=device)
     wc[HH,0,0] = wHH
     wc[XH,:,0] = wXH
     wc[XX] = w.reshape((-1,10,10))
-    #print('w: ', wc)
     return wc, e1b, e2a
+
+
+def GetSlaterCondonParameter(K, nA, expA, nB, expB, nC, expC, nD, expD):
+#     CALCULATE THE RADIAL PART OF ONE-CENTER TWO-ELECTRON INTEGRALS
+#     (SLATER-CONDON PARAMETER).
+#     K     - TYPE OF INTEGRAL, CAN BE EQUAL TO 0,1,2,3,4 IN SPD-BASIS
+#     nA,nB - PRINCIPLE QUANTUM NUMBER OF AO, ELECTRON 1
+#     expA,expB - EXPONENTS OF AO, ELECTRON 1
+#     nC,nD - PRINCIPLE QUANTUM NUMBER OF AO, ELECTRON 2
+#     expC,expD - EXPONENTS OF AO, ELECTRON 2
+    nA, nB, nC, nD = int(nA), int(nB), int(nC), int(nD)
+    
+    AEA = math.log(expA)
+    AEB = math.log(expB)
+    AEC = math.log(expC)
+    AED = math.log(expD)
+    nAB = nA + nB
+    nCD = nC + nD
+    expAB = expA + expB
+    expCD = expC + expD
+    expABCD = expAB + expCD
+    nABCD = nAB + nCD
+    Aexp = math.log(expABCD)
+    A2  = math.log(2)
+    AAB = math.log(expAB)
+    ACD = math.log(expCD)
+    C = math.exp(math.log(math.factorial(N-1)) + nA * AEA + nB * AEB + nC * AEC + nD * AED 
+                 + 0.5 * (AEA + AEB + AEC + AED) + A2 * (nABCD + 2) 
+                 - 0.5 * (math.log(math.factorial(2 * nA)) + math.log(math.factorial(2 * nB))   
+                 + math.log(math.factorial(2 * nC)) + math.log(math.factorial(2 * nD))) - Aexp * nABCD)
+    C = C * ev
+    S0, S1, S2 = 1. / expABCD, 0, 0
+    M = nCD - K
+    I = 1
+    
+    while (I <= M):
+        S0 = S0 * expABCD / expCD
+        S1 = S1 + S0 * (binom(nCD - K - 1, I - 1) - binom(nCD + K, I - 1)) / binom(nABCD - 1, I - 1)
+        I  = I + 1
+    M1 = M + 1
+    M2 = nCD + K + 1
+    I = M1
+    while (I <= M2):
+        S0 = S0 * expABCD / expCD
+        S2 = S2 + S0 * binom(M2 - 1, I - 1) / binom(nABCD - 1, I - 1)
+        I = I + 1
+    S3 = math.exp(Aexp * nABCD - ACD * M2 - AAB * (nAB - K)) / binom(nABCD - 1, M2 - 1)
+    slaterCondon = C * (S1 - S2 + S3)
+    return slaterCondon
+
+
+def binom(a, b):
+      n = math.factorial(a)
+      m = math.factorial(b)
+      o = math.factorial(a-b)
+      return n / (m * o)

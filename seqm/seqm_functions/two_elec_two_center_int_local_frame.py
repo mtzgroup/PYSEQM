@@ -1,6 +1,8 @@
 import torch
 from torch import sqrt
 from .constants import ev
+import sys
+
 
 #this version try to split the pairs H-H, X-H, and X-X
 # ~40% pairs are X-X, and each take 22 in ri
@@ -14,8 +16,9 @@ from .constants import ev
 # will generate ri for each type of pairs, and do the same thing on rotate.f
 # then combine them together to be in the same shape
 
-#chech repp.f
-def two_elec_two_center_int_local_frame(ni,nj,r0, tore, da0,db0, qa0,qb0, rho0a,rho0b, rho1a,rho1b, rho2a,rho2b ):
+#check repp.f
+def two_elec_two_center_int_local_frame(ni, nj, r0, tore, da0, db0, qa0, qb0,
+                            rho0a, rho0b, rho1a, rho1b, rho2a, rho2b, themethod):
     """
     two electron two center integrals in local frame for each pair
     """

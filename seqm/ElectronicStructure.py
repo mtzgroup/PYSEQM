@@ -48,7 +48,6 @@ class Electronic_Structure(torch.nn.Module):
             molecule.force, P, molecule.Hf, molecule.Etot, molecule.Eelec, molecule.Enuc, molecule.Eiso, molecule.e_mo, molecule.e_gap, self.charge, self.notconverged = \
                         self.conservative_force(molecule, P0=P0, learned_parameters=learned_parameters, *args, **kwargs)
             molecule.dm = P.detach()
-            
         elif dm_prop=='XL-BOMD':
             molecule.force, molecule.dm, molecule.Hf, molecule.Etot, molecule.Eelec, molecule.Enuc, molecule.Eiso, molecule.e_mo, molecule.e_gap, \
             molecule.Electronic_entropy, molecule.dP2dt2, molecule.Krylov_Error,  molecule.Fermi_occ = \
@@ -56,11 +55,12 @@ class Electronic_Structure(torch.nn.Module):
 
         with torch.no_grad():
             # $$$
+            n_orbi = 9 if molecule.method == 'PM6' else 4
             if molecule.dm.dim() == 4:
-                molecule.q = molecule.const.tore[molecule.species] - self.atomic_charges(molecule.dm[:,0])
-                molecule.q -= self.atomic_charges(molecule.dm[:,1]) # unit +e, i.e. electron: -1.0
+                molecule.q = molecule.const.tore[molecule.species] - self.atomic_charges(molecule.dm[:,0], n_orbital=n_orbi)
+                molecule.q -= self.atomic_charges(molecule.dm[:,1], n_orbital=n_orbi) # unit +e, i.e. electron: -1.0
             else:
-                molecule.q = molecule.const.tore[molecule.species] - self.atomic_charges(molecule.dm) # unit +e, i.e. electron: -1.0
+                molecule.q = molecule.const.tore[molecule.species] - self.atomic_charges(molecule.dm, n_orbital=n_orbi) # unit +e, i.e. electron: -1.0
             molecule.d = self.dipole(molecule.q, molecule.coordinates)
             
 

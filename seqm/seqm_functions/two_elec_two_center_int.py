@@ -1102,10 +1102,12 @@ def GetSlaterCondonParameter(K, nA, expA, nB, expB, nC, expC, nD, expD):
     A2  = math.log(2)
     AAB = math.log(expAB)
     ACD = math.log(expCD)
-    C = math.exp(math.log(math.factorial(N-1)) + nA * AEA + nB * AEB + nC * AEC + nD * AED 
+    C = math.exp(math.log(math.factorial(nABCD - 1))
+                 + nA * AEA + nB * AEB + nC * AEC + nD * AED 
                  + 0.5 * (AEA + AEB + AEC + AED) + A2 * (nABCD + 2) 
-                 - 0.5 * (math.log(math.factorial(2 * nA)) + math.log(math.factorial(2 * nB))   
-                 + math.log(math.factorial(2 * nC)) + math.log(math.factorial(2 * nD))) - Aexp * nABCD)
+                 - 0.5 * (math.log(math.factorial(2 * nA)) + math.log(math.factorial(2 * nB))
+                 + math.log(math.factorial(2 * nC)) + math.log(math.factorial(2 * nD)))
+                 - Aexp * nABCD)
     C = C * ev
     S0, S1, S2 = 1. / expABCD, 0, 0
     M = nCD - K

@@ -7,9 +7,6 @@ from .constants import overlap_cutoff
 
 
 def hcore(molecule):
-#const, nmol, molsize, maskd, mask, idxi, idxj, ni, nj, xij, rij,
-#          Z, zetas, zetap, zetad, zs, zp, zd, uss, upp, udd, gss, gpp, 
-#          gp2, hsp, F0SD, G2SD, rho_core, alpha, chi, themethod, beta, Kbeta=None):
     """
     Get Hcore and two electron and two center integrals
     """
@@ -60,12 +57,14 @@ def hcore(molecule):
 
     #use uss upp to the diagonal block for hcore
     if (molecule.method == 'PM6'):
-        zeta = torch.cat((molecule.zetas.unsqueeze(1), molecule.zetap.unsqueeze(1),
-                          molecule.zetad.unsqueeze(1)), dim=1)
+        zeta = torch.cat((molecule.parameters['zeta_s'].unsqueeze(1),
+                          molecule.parameters['zeta_p'].unsqueeze(1),
+                          molecule.parameters['zeta_d'].unsqueeze(1)), dim=1)
     else:
-        zeta = torch.cat((molecule.zetas.unsqueeze(1), molecule.zetap.unsqueeze(1)), dim=1)
+        zeta = torch.cat((molecule.parameters['zeta_s'].unsqueeze(1),
+                          molecule.parameters['zeta_p'].unsqueeze(1)), dim=1)
     
-    overlap_pairs = rij<=overlap_cutoff
+    overlap_pairs = (molecule.rij <= overlap_cutoff)
     if (molecule.method == 'PM6'):
         di = torch.zeros((molecule.xij.shape[0], 9, 9), dtype=dtype, device=device)
         di[overlap_pairs] = diatom_overlap_matrixD(molecule.ni[overlap_pairs],
@@ -94,9 +93,6 @@ def hcore(molecule):
                                    zeta[molecule.idxj][overlap_pairs],
                                    qn_int)
 
-    w, e1b, e2a, rho0xi, rho0xj = TETCI(const, idxi, idxj, ni, nj, xij, rij, Z, 
-                                zetas, zetap, zetad, zs, zp, zd,  gss, gpp, gp2,
-                                hsp, F0SD, G2SD, rho_core, alpha, chi, themethod)
     w, e1b, e2a, rho0xi, rho0xj = TETCI(molecule.const, molecule.idxi, molecule.idxj, molecule.ni, molecule.nj,
                                         molecule.xij, molecule.rij, molecule.Z,
                                         molecule.parameters['zeta_s'], molecule.parameters['zeta_p'],
@@ -106,11 +102,11 @@ def hcore(molecule):
                                         molecule.parameters['g_p2'], molecule.parameters['h_sp'],
                                         molecule.parameters['F0SD'], molecule.parameters['G2SD'],
                                         molecule.parameters['rho_core'], molecule.alp, molecule.chi, molecule.method)    
-    ntotatoms = nmol * molsize
+    ntotatoms = molecule.nmol * molecule.molsize * molecule.molsize
     if molecule.method == 'PM6':
-        M = torch.zeros(molecule.nmol*molecule.molsize*molecule.molsize, 9, 9, dtype=dtype, device=device)
+        M = torch.zeros(ntotatoms, 9, 9, dtype=dtype, device=device)
     else:
-        M = torch.zeros(molecule.nmol*molecule.molsize*molecule.molsize, 4, 4, dtype=dtype, device=device)
+        M = torch.zeros(ntotatoms, 4, 4, dtype=dtype, device=device)
     
     #fill the upper triangle part
     #unlike the mopac, which fills the lower triangle part

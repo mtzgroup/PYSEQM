@@ -42,7 +42,7 @@ class Molecule(torch.nn.Module):
         else:
             self.parameters, self.alp, self.chi = self.packpar(self.Z, learned_params=learned_parameters)
         
-        if (self.method == 'PM6'): # PM6 not implemented yet. Only PM6_SP
+        if (self.method == 'PM6'):
             self.parameters['beta'] = torch.cat((self.parameters['beta_s'].unsqueeze(1),
                                                  self.parameters['beta_p'].unsqueeze(1),
                                                  self.parameters['beta_d'].unsqueeze(1)), dim=1)

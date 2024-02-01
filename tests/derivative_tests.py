@@ -17,10 +17,10 @@ torch.set_default_dtype(torch.double) # safe choice for finite differences in gr
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 
-
+debug_full = True
 prop = "energy"#"gap"
-variable = "coords"#"param"
-uhf = True
+variable = "param"#"coords"#"param"
+uhf = False
 
 if uhf:
     species = torch.as_tensor([[6,1,1,1]], dtype=torch.int64, device=device)
@@ -102,12 +102,14 @@ with torch.autograd.set_detect_anomaly(True):
     except BaseException as eg0:
         print("Gradient NOT correct")
         parse_exc(eg0)
+        if debug_full: print("\n-----\n"+str(eg0)+"\n-----\n")
     try:
         test_hess0 = torch.autograd.gradgradcheck(f0, (gradvar,), eps=1e-6, atol=0.001, rtol=0.01)
         print("Second derivative correct")
     except BaseException as eh0:
         print("Second derivative NOT correct")
         parse_exc(eh0)
+        if debug_full: print("\n-----\n"+str(eh0)+"\n-----\n")
     
     seqm_parameters['scf_backward'] = 1
     print("\nscf_backward = 1")
@@ -119,12 +121,14 @@ with torch.autograd.set_detect_anomaly(True):
     except BaseException as eg1:
         print("Gradient NOT correct")
         parse_exc(eg1)
+        if debug_full: print("\n-----\n"+str(eg1)+"\n-----\n")
     try:
         test_hess1 = torch.autograd.gradgradcheck(f1, (gradvar,), eps=1e-6, atol=0.001, rtol=0.01)
         print("Second derivative correct")
     except BaseException as eh1:
         print("Second derivative NOT correct")
         parse_exc(eh1)
+        if debug_full: print("\n-----\n"+str(eh1)+"\n-----\n")
     
     seqm_parameters['scf_backward'] = 2
     print("\nscf_backward = 2")
@@ -136,10 +140,12 @@ with torch.autograd.set_detect_anomaly(True):
     except BaseException as eg2:
         print("Gradient NOT correct")
         parse_exc(eg2)
+        if debug_full: print("\n-----\n"+str(eg2)+"\n-----\n")
     try:
         test_hess2 = torch.autograd.gradgradcheck(f2, (gradvar,), eps=1e-6, atol=0.001, rtol=0.01)
         print("Second derivative correct")
     except BaseException as eh2:
         print("Second derivative NOT correct")
         parse_exc(eh2)
+        if debug_full: print("\n-----\n"+str(eh2)+"\n-----\n")
     

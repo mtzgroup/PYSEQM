@@ -390,13 +390,14 @@ class Energy(torch.nn.Module):
         else:
             molecule.parameters, molecule.alp, molecule.chi = self.packpar(molecule.Z, learned_params=learned_parameters)
         
-        if (molecule.method == 'PM6'):
-            molecule.parameters['beta'] = torch.cat((molecule.parameters['beta_s'].unsqueeze(1),
-                                                     molecule.parameters['beta_p'].unsqueeze(1),
-                                                     molecule.parameters['beta_d'].unsqueeze(1)), dim=1)
-        else:
-            molecule.parameters['beta'] = torch.cat((molecule.parameters['beta_s'].unsqueeze(1),
-                                                     molecule.parameters['beta_p'].unsqueeze(1)), dim=1)
+#        if (molecule.method == 'PM6'):
+#            molecule.parameters['beta'] = torch.cat((molecule.parameters['beta_s'].unsqueeze(1),
+#                                                     molecule.parameters['beta_p'].unsqueeze(1),
+#                                                     molecule.parameters['beta_d'].unsqueeze(1)), dim=1)
+#        else:
+#            molecule.parameters['beta'] = torch.cat((molecule.parameters['beta_s'].unsqueeze(1),
+#                                                     molecule.parameters['beta_p'].unsqueeze(1)), dim=1)
+        if not (molecule.method == 'PM6'):
             molecule.parameters['zeta_d'] = torch.zeros_like(molecule.parameters['zeta_s'])
             molecule.parameters['s_orb_exp_tail'] = torch.zeros_like(molecule.parameters['zeta_s'])
             molecule.parameters['p_orb_exp_tail'] = torch.zeros_like(molecule.parameters['zeta_s'])

@@ -182,40 +182,45 @@ def hcore(molecule):
     """
     #e1b, e2a are reshaped to be (...,4,4) in rotate.py
     if molecule.method == 'PM6':
+        beta = torch.cat((molecule.parameters['beta_s'].unsqueeze(1),
+                          molecule.parameters['beta_p'].unsqueeze(1),
+                          molecule.parameters['beta_d'].unsqueeze(1)), dim=1)
         #di = di.transpose(1,2)
         if torch.is_tensor(molecule.parameters['Kbeta']):
-            M[molecule.mask,0,0]     = di[...,0,0]    * (molecule.parameters['beta'][molecule.idxi,0]       + molecule.parameters['beta'][molecule.idxj,0])       / 2.0 * molecule.parameters['Kbeta'][:,0]
-            M[molecule.mask,0,1:4]   = di[...,0,1:4]  * (molecule.parameters['beta'][molecule.idxi,0:1]     + molecule.parameters['beta'][molecule.idxj,1:2])     / 2.0 * molecule.parameters['Kbeta'][:,1,None]
-            M[molecule.mask,1:4,0]   = di[...,1:4,0]  * (molecule.parameters['beta'][molecule.idxi,1:2]     + molecule.parameters['beta'][molecule.idxj,0:1])     / 2.0 * molecule.parameters['Kbeta'][:,2,None]
-            M[molecule.mask,1:4,1:4] = di[...,1:4,1:4]* (molecule.parameters['beta'][molecule.idxi,1:2,None]+ molecule.parameters['beta'][molecule.idxj,1:2,None])/ 2.0 * molecule.parameters['Kbeta'][:,3:,None]
-            M[molecule.mask,0,4:]    = di[...,0,4:]   * (molecule.parameters['beta'][molecule.idxi,0:1]     + molecule.parameters['beta'][molecule.idxj,2:3])     / 2.0
-            M[molecule.mask,4:,0]    = di[...,4:,0]   * (molecule.parameters['beta'][molecule.idxi,2:3]     + molecule.parameters['beta'][molecule.idxj,0:1])     / 2.0
-            M[molecule.mask,1:4,4:]  = di[...,1:4,4:] * (molecule.parameters['beta'][molecule.idxi,1:2,None]+ molecule.parameters['beta'][molecule.idxj,2:3,None])/ 2.0
-            M[molecule.mask,4:,1:4]  = di[...,4:,1:4] * (molecule.parameters['beta'][molecule.idxi,2:3,None]+ molecule.parameters['beta'][molecule.idxj,1:2,None])/ 2.0
-            M[molecule.mask,4:,4:]   = di[...,4:,4:]  * (molecule.parameters['beta'][molecule.idxi,2:3,None]+ molecule.parameters['beta'][molecule.idxj,2:3,None])/ 2.0
+            M[molecule.mask,0,0]     = di[...,0,0]    * (beta[molecule.idxi,0]       + beta[molecule.idxj,0])       / 2.0 * molecule.parameters['Kbeta'][:,0]
+            M[molecule.mask,0,1:4]   = di[...,0,1:4]  * (beta[molecule.idxi,0:1]     + beta[molecule.idxj,1:2])     / 2.0 * molecule.parameters['Kbeta'][:,1,None]
+            M[molecule.mask,1:4,0]   = di[...,1:4,0]  * (beta[molecule.idxi,1:2]     + beta[molecule.idxj,0:1])     / 2.0 * molecule.parameters['Kbeta'][:,2,None]
+            M[molecule.mask,1:4,1:4] = di[...,1:4,1:4]* (beta[molecule.idxi,1:2,None]+ beta[molecule.idxj,1:2,None])/ 2.0 * molecule.parameters['Kbeta'][:,3:,None]
+            M[molecule.mask,0,4:]    = di[...,0,4:]   * (beta[molecule.idxi,0:1]     + beta[molecule.idxj,2:3])     / 2.0
+            M[molecule.mask,4:,0]    = di[...,4:,0]   * (beta[molecule.idxi,2:3]     + beta[molecule.idxj,0:1])     / 2.0
+            M[molecule.mask,1:4,4:]  = di[...,1:4,4:] * (beta[molecule.idxi,1:2,None]+ beta[molecule.idxj,2:3,None])/ 2.0
+            M[molecule.mask,4:,1:4]  = di[...,4:,1:4] * (beta[molecule.idxi,2:3,None]+ beta[molecule.idxj,1:2,None])/ 2.0
+            M[molecule.mask,4:,4:]   = di[...,4:,4:]  * (beta[molecule.idxi,2:3,None]+ beta[molecule.idxj,2:3,None])/ 2.0
         else:
-            M[molecule.mask,0,0]     = di[...,0,0]    * (molecule.parameters['beta'][molecule.idxi,0]       + molecule.parameters['beta'][molecule.idxj,0])       / 2.0
-            M[molecule.mask,0,1:4]   = di[...,0,1:4]  * (molecule.parameters['beta'][molecule.idxi,0:1]     + molecule.parameters['beta'][molecule.idxj,1:2])     / 2.0
-            M[molecule.mask,1:4,0]   = di[...,1:4,0]  * (molecule.parameters['beta'][molecule.idxi,1:2]     + molecule.parameters['beta'][molecule.idxj,0:1])     / 2.0
-            M[molecule.mask,1:4,1:4] = di[...,1:4,1:4]* (molecule.parameters['beta'][molecule.idxi,1:2,None]+ molecule.parameters['beta'][molecule.idxj,1:2,None])/ 2.0
-            M[molecule.mask,0,4:]    = di[...,0,4:]   * (molecule.parameters['beta'][molecule.idxi,0:1]     + molecule.parameters['beta'][molecule.idxj,2:3])     / 2.0
-            M[molecule.mask,4:,0]    = di[...,4:,0]   * (molecule.parameters['beta'][molecule.idxi,2:3]     + molecule.parameters['beta'][molecule.idxj,0:1])     / 2.0
-            M[molecule.mask,1:4,4:]  = di[...,1:4,4:] * (molecule.parameters['beta'][molecule.idxi,1:2,None]+ molecule.parameters['beta'][molecule.idxj,2:3,None])/ 2.0
-            M[molecule.mask,4:,1:4]  = di[...,4:,1:4] * (molecule.parameters['beta'][molecule.idxi,2:3,None]+ molecule.parameters['beta'][molecule.idxj,1:2,None])/ 2.0
-            M[molecule.mask,4:,4:]   = di[...,4:,4:]  * (molecule.parameters['beta'][molecule.idxi,2:3,None]+ molecule.parameters['beta'][molecule.idxj,2:3,None])/ 2.0
+            M[molecule.mask,0,0]     = di[...,0,0]    * (beta[molecule.idxi,0]       + beta[molecule.idxj,0])       / 2.0
+            M[molecule.mask,0,1:4]   = di[...,0,1:4]  * (beta[molecule.idxi,0:1]     + beta[molecule.idxj,1:2])     / 2.0
+            M[molecule.mask,1:4,0]   = di[...,1:4,0]  * (beta[molecule.idxi,1:2]     + beta[molecule.idxj,0:1])     / 2.0
+            M[molecule.mask,1:4,1:4] = di[...,1:4,1:4]* (beta[molecule.idxi,1:2,None]+ beta[molecule.idxj,1:2,None])/ 2.0
+            M[molecule.mask,0,4:]    = di[...,0,4:]   * (beta[molecule.idxi,0:1]     + beta[molecule.idxj,2:3])     / 2.0
+            M[molecule.mask,4:,0]    = di[...,4:,0]   * (beta[molecule.idxi,2:3]     + beta[molecule.idxj,0:1])     / 2.0
+            M[molecule.mask,1:4,4:]  = di[...,1:4,4:] * (beta[molecule.idxi,1:2,None]+ beta[molecule.idxj,2:3,None])/ 2.0
+            M[molecule.mask,4:,1:4]  = di[...,4:,1:4] * (beta[molecule.idxi,2:3,None]+ beta[molecule.idxj,1:2,None])/ 2.0
+            M[molecule.mask,4:,4:]   = di[...,4:,4:]  * (beta[molecule.idxi,2:3,None]+ beta[molecule.idxj,2:3,None])/ 2.0
     else:
+        beta = torch.cat((molecule.parameters['beta_s'].unsqueeze(1),
+                          molecule.parameters['beta_p'].unsqueeze(1)), dim=1)
         if torch.is_tensor(molecule.parameters['Kbeta']):
-            M[molecule.mask,0,0]   = di[...,0,0]   * (molecule.parameters['beta'][molecule.idxi,0]        + molecule.parameters['beta'][molecule.idxj,0])        / 2.0 * molecule.parameters['Kbeta'][:,0]
-            M[molecule.mask,0,1:]  = di[...,0,1:]  * (molecule.parameters['beta'][molecule.idxi,0:1]      + molecule.parameters['beta'][molecule.idxj,1:2])      / 2.0 * molecule.parameters['Kbeta'][:,1,None]
-            M[molecule.mask,1:,0]  = di[...,1:,0]  * (molecule.parameters['beta'][molecule.idxi,1:2]      + molecule.parameters['beta'][molecule.idxj,0:1])      / 2.0 * molecule.parameters['Kbeta'][:,2,None]
-            M[molecule.mask,1:,1:] = di[...,1:,1:] * (molecule.parameters['beta'][molecule.idxi,1:2,None] + molecule.parameters['beta'][molecule.idxj,1:2,None]) / 2.0 * molecule.parameters['Kbeta'][:,3:,None]
+            M[molecule.mask,0,0]   = di[...,0,0]   * (beta[molecule.idxi,0]        + beta[molecule.idxj,0])        / 2.0 * molecule.parameters['Kbeta'][:,0]
+            M[molecule.mask,0,1:]  = di[...,0,1:]  * (beta[molecule.idxi,0:1]      + beta[molecule.idxj,1:2])      / 2.0 * molecule.parameters['Kbeta'][:,1,None]
+            M[molecule.mask,1:,0]  = di[...,1:,0]  * (beta[molecule.idxi,1:2]      + beta[molecule.idxj,0:1])      / 2.0 * molecule.parameters['Kbeta'][:,2,None]
+            M[molecule.mask,1:,1:] = di[...,1:,1:] * (beta[molecule.idxi,1:2,None] + beta[molecule.idxj,1:2,None]) / 2.0 * molecule.parameters['Kbeta'][:,3:,None]
             #raise ValueError('Kbeta for each pair is not implemented yet')
         else:
             #beta is for each atom in the molecules, shape (ntotatoms,2)
-            M[molecule.mask,0,0]   = di[...,0,0]   * (molecule.parameters['beta'][molecule.idxi,0]        + molecule.parameters['beta'][molecule.idxj,0])        / 2.0
-            M[molecule.mask,0,1:]  = di[...,0,1:]  * (molecule.parameters['beta'][molecule.idxi,0:1]      + molecule.parameters['beta'][molecule.idxj,1:2])      / 2.0
-            M[molecule.mask,1:,0]  = di[...,1:,0]  * (molecule.parameters['beta'][molecule.idxi,1:2]      + molecule.parameters['beta'][molecule.idxj,0:1])      / 2.0
-            M[molecule.mask,1:,1:] = di[...,1:,1:] * (molecule.parameters['beta'][molecule.idxi,1:2,None] + molecule.parameters['beta'][molecule.idxj,1:2,None]) / 2.0
+            M[molecule.mask,0,0]   = di[...,0,0]   * (beta[molecule.idxi,0]        + beta[molecule.idxj,0])        / 2.0
+            M[molecule.mask,0,1:]  = di[...,0,1:]  * (beta[molecule.idxi,0:1]      + beta[molecule.idxj,1:2])      / 2.0
+            M[molecule.mask,1:,0]  = di[...,1:,0]  * (beta[molecule.idxi,1:2]      + beta[molecule.idxj,0:1])      / 2.0
+            M[molecule.mask,1:,1:] = di[...,1:,1:] * (beta[molecule.idxi,1:2,None] + beta[molecule.idxj,1:2,None]) / 2.0
         #caution
         #the lower triangle part is not filled here
     """

@@ -6,12 +6,10 @@ from seqm.basics import Energy, Parser
 import seqm
 seqm.seqm_functions.scf_loop.debug = False
 seqm.seqm_functions.diag.DEGEN_EIGENSOLVER = True
-seqm.seqm_functions.scf_loop.SCF_BACKWARD_MAX_ITER = 400
 seqm.seqm_functions.scf_loop.SCF_IMPLICIT_BACKWARD = True
-seqm.seqm_functions.scf_loop.SCF_BACKWARD_ANDERSON_TOLERANCE = 1e-4
-seqm.seqm_functions.scf_loop.SCF_BACKWARD_ANDERSON_MAXITER = 40
-seqm.seqm_functions.scf_loop.SCF_BACKWARD_ANDERSON_HISTSIZE = 5
-
+seqm.seqm_functions.scf_loop.SCF_BACKWARD_ANDERSON_TOLERANCE = 1e-6
+seqm.seqm_functions.scf_loop.SCF_BACKWARD_ANDERSON_MAXITER = 200
+seqm.seqm_functions.scf_loop.SCF_BACKWARD_ANDERSON_HISTSIZE = 10
 seqm.seqm_functions.scf_loop.SCF_BACKWARD_MAX_ITER = 200
 
 

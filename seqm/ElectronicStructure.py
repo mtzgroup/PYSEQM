@@ -32,12 +32,13 @@ class Electronic_Structure(torch.nn.Module):
         """
         n_molecule = P.shape[0]
         n_atom = P.shape[1]//n_orbital
-        q = P.diagonal(dim1=1,dim2=2).reshape(n_molecule, n_atom, n_orbital).sum(axis=2)
+        q = P.diagonal(dim1=1,dim2=2).reshape(n_molecule, n_atom, n_orbital).sum(dim=2)
         return q
     
     @staticmethod
-    def dipole(q, coordinates):
-        return torch.sum(q.unsqueeze(2)*coordinates, axis=1)
+    def dipole(q, coordinates, com2zero=True):
+        R = coordinates - coordinates.mean(dim=1).unsqueeze(1) if com2zero else coordinates
+        return torch.sum( q.unsqueeze(2) * R, dim=1 )
 
     def forward(self, molecule, learned_parameters=dict(), xl_bomd_params=dict(), P0=None, err_threshold = None, max_rank = None, T_el = None, dm_prop='SCF', *args, **kwargs):
         """

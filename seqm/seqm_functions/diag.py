@@ -10,7 +10,7 @@ CHECK_DEGENERACY = False
 # if no, then occupied orbitals are from 0, 1, ..., nocc-1
 # if yes, then equal contributions are used for degenarated orbitals near fermi level
 
-DEGEN_EIGENSOLVER = True
+#DEGEN_EIGENSOLVER = True
 # flag whether or not to use eigensolver that's differentiable for degenerate
 # eigenpairs (keep option to use default pytorch solver for sanity checks)
 DEGEN_THRESHOLD = torch.finfo(torch.float).eps ** 0.6
@@ -95,8 +95,8 @@ def construct_P(e, v, nocc):
     cond = (e-e[nocc-1]).abs()<=atol
     if cond[nocc:].any():
         c = torch.nonzero(cond)
-        indx1 = c[0].item()
-        indx2 = c[-1].item()+1
+        indx1 = c[0]#.item()
+        indx2 = c[-1]+1#.item()+1
         nd = indx2-indx1
         coeff = torch.ones(1, indx2, device=e.device,dtype=e.dtype)
         coeff[0,indx1:] = (nocc.type(torch.double)-indx1)/nd
@@ -106,7 +106,7 @@ def construct_P(e, v, nocc):
     return t
 
 
-def sym_eig_trunc(x, nheavyatom, nH, nocc, eig_only=False):
+def sym_eig_trunc(x, nheavyatom, nH, nocc, eig_only=False, DEGEN_EIGENSOLVER=True):
     sym_eigh = degen_symeig.apply if DEGEN_EIGENSOLVER else pytorch_symeig
     dtype =  x.dtype
     device = x.device
@@ -130,7 +130,7 @@ def sym_eig_trunc(x, nheavyatom, nH, nocc, eig_only=False):
 
         norb = nheavyatom*4+nH
         pnorb = size - norb
-        nn = torch.max(pnorb).item()
+        nn = torch.max(pnorb)#.item()
         dx = 0.005
         mutipler = torch.arange(1.0+dx, 1.0+nn*dx+dx, dx, dtype=dtype, device=device)[:nn]
         ind = torch.arange(size, dtype=torch.int64, device=device)
@@ -138,11 +138,11 @@ def sym_eig_trunc(x, nheavyatom, nH, nocc, eig_only=False):
         for i in range(nmol):
             if cond[i]:
                 x0[i,ind[norb[i]:], ind[norb[i]:]] = mutipler[:pnorb[i]]*dE[i]+hN[i]
-        try:
-            e0, v = sym_eigh(x0)
-        except:
-            if torch.isnan(x0).any(): print(x0)
-            e0, v = sym_eigh(x0)
+#        try:
+        e0, v = sym_eigh(x0)
+#        except:
+#            if torch.isnan(x0).any(): print(x0)
+#            e0, v = sym_eigh(x0)
         e = torch.zeros((nmol, x.shape[-1]),dtype=dtype,device=device)
         e[...,:size] = e0
         for i in range(nmol):
@@ -159,7 +159,7 @@ def sym_eig_trunc(x, nheavyatom, nH, nocc, eig_only=False):
 
         norb = nheavyatom*4+nH
         pnorb = size - norb
-        nn = torch.max(pnorb).item()
+        nn = torch.max(pnorb)#.item()
         dx = 0.005
         mutipler = torch.arange(1.0+dx, 1.0+nn*dx+dx, dx, dtype=dtype, device=device)[:nn]
         ind = torch.arange(size, dtype=torch.int64, device=device)
@@ -167,11 +167,11 @@ def sym_eig_trunc(x, nheavyatom, nH, nocc, eig_only=False):
         for i in range(nmol):
             if cond[i]:
                 x0[i,ind[norb[i]:], ind[norb[i]:]] = mutipler[:pnorb[i]]*dE[i]+hN[i]
-        try:
-            e0, v = sym_eigh(x0)
-        except:
-            if torch.isnan(x0).any(): print(x0)
-            e0, v = sym_eigh(x0)
+#        try:
+        e0, v = sym_eigh(x0)
+#        except:
+#            if torch.isnan(x0).any(): print(x0)
+#            e0, v = sym_eigh(x0)
         e = torch.zeros((nmol, x.shape[-1]),dtype=dtype,device=device)
         e[...,:size] = e0
         for i in range(nmol):
@@ -199,9 +199,11 @@ def sym_eig_trunc(x, nheavyatom, nH, nocc, eig_only=False):
         t*=2.0
         """
         if CHECK_DEGENERACY:
-            t = torch.stack(list(map(lambda a,b,n : construct_P(a, b, n), e, v, nocc)))
+            t = torch.stack([construct_P(a,b,n) for (a,b,n) in zip(e,v,nocc)])
+#            t = torch.stack(list(map(lambda a,b,n : construct_P(a, b, n), e, v, nocc)))
         else:
-            t = 2.0*torch.stack(list(map(lambda a,n : torch.matmul(a[:,:n], a[:,:n].transpose(0,1)), v, nocc)))
+            t = 2 * torch.stack([a[:,:n].matmul(a[:,:n].transpose(0,1)) for (a,n) in zip(v,nocc)])
+#            t = 2.0*torch.stack(list(map(lambda a,n : torch.matmul(a[:,:n], a[:,:n].transpose(0,1)), v, nocc)))
             
     P = unpack(t, nheavyatom, nH, x.shape[-1])
 
@@ -214,7 +216,7 @@ def sym_eig_trunc(x, nheavyatom, nH, nocc, eig_only=False):
 
 
 
-def sym_eig_trunc1(x, nheavyatom, nH, nocc, eig_only=False):
+def sym_eig_trunc1(x, nheavyatom, nH, nocc, eig_only=False, DEGEN_EIGENSOLVER=True):
     sym_eigh = degen_symeig.apply if DEGEN_EIGENSOLVER else pytorch_symeig
     dtype = x.dtype
     device = x.device
@@ -231,17 +233,20 @@ def sym_eig_trunc1(x, nheavyatom, nH, nocc, eig_only=False):
         x_orig_shape = x.size()
         x = x.flatten(start_dim=0, end_dim=1)
         
-        e0, v0 = list(zip(*list(map(
-                        lambda a, b, c: sym_eigh(pack(a, b, c)),
-                        x, nheavyatom, nH))))
+#        e0, v0 = list(zip(*list(map(
+#                        lambda a, b, c: sym_eigh(pack(a, b, c)),
+#                        x, nheavyatom, nH))))
+        e0, v0 = list(zip(*(sym_eigh(pack(a, b, c)) for (a,b,c) in zip(x, nheavyatom, nH))))
         if CHECK_DEGENERACY:
-            P0 = list(map(
-                     lambda e, v, nc : construct_P(e, v, nc),
-                     e0, v0, nocc))
+            P0 = [construct_P(e, v, n) for (e,v,n) in zip(e0, v0, nocc)]
+#            P0 = list(map(
+#                     lambda e, v, nc : construct_P(e, v, nc),
+#                     e0, v0, nocc))
         else:
-            P0 = list(map(
-                     lambda v, nc : 2.0*torch.matmul(v[:,:nc], v[:,:nc].transpose(0,1)),
-                     v0, nocc))
+            P0 = [2 * v[:,:n].matmul(v[:,:n].transpose(0,1)) for (v,n) in zip(v0, nocc)]
+#            P0 = list(map(
+#                     lambda v, nc : 2.0*torch.matmul(v[:,:nc], v[:,:nc].transpose(0,1)),
+#                     v0, nocc))
         nmol = x.shape[0]
         norb = nheavyatom*4+nH
         e = torch.zeros(x.shape[:2], dtype=dtype, device=device)
@@ -251,22 +256,26 @@ def sym_eig_trunc1(x, nheavyatom, nH, nocc, eig_only=False):
             P[i] = unpack(P0[i], nheavyatom[i], nH[i], x.shape[-1])
             
         e = e.reshape(x_orig_shape[0:3])
-        v0 = tuple(map(lambda a, b : torch.stack((a, b), dim=0), v0[::2], v0[1::2]))
+#        v0 = tuple(map(lambda a, b : torch.stack((a, b), dim=0), v0[::2], v0[1::2]))
+        v0 = tuple(torch.stack((a, b), dim=0) for (a,b) in zip(v0[::2], v0[1::2]))
         P = P.reshape(x_orig_shape)
     else:#need to add large diagonal values to replace 0 padding
         #Gershgorin circle theorem estimate upper bounds of eigenvalues
 
-        e0, v0 = list(zip(*list(map(
-                        lambda a, b, c: sym_eigh(pack(a, b, c)),
-                        x, nheavyatom, nH))))
+#        e0, v0 = list(zip(*list(map(
+#                        lambda a, b, c: sym_eigh(pack(a, b, c)),
+#                        x, nheavyatom, nH))))
+        e0, v0 = list(zip(*(sym_eigh(pack(a, b, c)) for (a,b,c) in zip(x, nheavyatom, nH))))
         if CHECK_DEGENERACY:
-            P0 = list(map(
-                     lambda e, v, nc : construct_P(e, v, nc),
-                     e0, v0, nocc))
+            P0 = [construct_P(e, v, n) for (e,v,n) in zip(e0, v0, nocc)]
+#            P0 = list(map(
+#                     lambda e, v, nc : construct_P(e, v, nc),
+#                     e0, v0, nocc))
         else:
-            P0 = list(map(
-                     lambda v, nc : 2.0*torch.matmul(v[:,:nc], v[:,:nc].transpose(0,1)),
-                     v0, nocc))
+            P0 = [2 * v[:,:n].matmul(v[:,:n].transpose(0,1)) for (v,n) in zip(v0, nocc)]
+#            P0 = list(map(
+#                     lambda v, nc : 2.0*torch.matmul(v[:,:nc], v[:,:nc].transpose(0,1)),
+#                     v0, nocc))
         nmol = x.shape[0]
         norb = nheavyatom*4+nH
         e=torch.zeros(x.shape[:2], dtype=dtype, device=device)

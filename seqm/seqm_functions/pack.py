@@ -4,7 +4,7 @@ import torch
 #pack and unpack remove this padding and put the padding back
 
 
-def packone(x, nho, nHydro, norb):
+def packone(x, nho, nHydro, norb: int):
     x0 = torch.zeros((norb,norb), dtype=x.dtype, device=x.device)
     x0[:nho,:nho]=x[:nho,:nho]
     x0[:nho, nho:(nho+nHydro)] = x[:nho,nho:(nho+4*nHydro):4]
@@ -12,7 +12,7 @@ def packone(x, nho, nHydro, norb):
     x0[nho:(nho+nHydro), :nho] = x[nho:(nho+4*nHydro):4, :nho]
     return x0
 
-def unpackone(x0, nho, nHydro, size):
+def unpackone(x0, nho, nHydro, size: int):
     x = torch.zeros((size, size), dtype=x0.dtype, device=x0.device)
     x[:nho,:nho] = x0[:nho,:nho]
     x[:nho,nho:(nho+4*nHydro):4] = x0[:nho, nho:(nho+nHydro)]
@@ -31,10 +31,12 @@ def pack(x, nHeavy, nHydro):
         #print('pack 4')
         norb = torch.max(nho+nHydro)
         x = x.flatten(start_dim=0, end_dim=1)
-        x0 = torch.stack(list(map(lambda a, b, c : packone(a, b, c, norb), x, nho, nHydro)))
+        x0 = torch.stack([packone(a, b, c, norb) for (a,b,c) in zip(x, nho, nHydro)])
+#        x0 = torch.stack(list(map(lambda a, b, c : packone(a, b, c, norb), x, nho, nHydro)))
     else:
         norb = torch.max(nho+nHydro)
-        x0 = torch.stack(list(map(lambda a, b, c : packone(a, b, c, norb), x, nho, nHydro)))
+        x0 = torch.stack([packone(a, b, c, norb) for (a,b,c) in zip(x, nho, nHydro)])
+#        x0 = torch.stack(list(map(lambda a, b, c : packone(a, b, c, norb), x, nho, nHydro)))
 
     return x0
 
@@ -45,5 +47,6 @@ def unpack(x0, nHeavy, nHydro, size):
         x = unpackone(x0, nHeavy*4, nHydro, size)
     else:
         nho = 4*nHeavy
-        x = torch.stack(list(map(lambda a, b, c : unpackone(a, b, c, size), x0, nho, nHydro)))
+        x = torch.stack([unpackone(a, b, c, size) for (a,b,c) in zip(x0, nho, nHydro)])
+#        x = torch.stack(list(map(lambda a, b, c : unpackone(a, b, c, size), x0, nho, nHydro)))
     return x

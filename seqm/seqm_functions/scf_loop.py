@@ -672,44 +672,47 @@ class SCF(torch.autograd.Function):
     forward and backward
     check function scf_loop for details
     """
-    def __init__(self, scf_converger=[2], use_sp2=[False], scf_backward_eps=1.0e-2):
-        SCF.sp2 = use_sp2
-        SCF.converger = scf_converger
-        SCF.scf_backward_eps = scf_backward_eps
+##  This is the old style, avoid.
+#    def __init__(self, scf_converger=[2], use_sp2=[False], scf_backward_eps=1.0e-2):
+#        SCF.sp2 = use_sp2
+#        SCF.converger = scf_converger
+#        SCF.scf_backward_eps = scf_backward_eps
     
     
     @staticmethod
     def forward(ctx, M, w, gss, gpp, gsp, gp2, hsp,
                 nHydro, nHeavy, nOccMO, nmol, molsize,
-                maskd, mask, atom_molid, pair_molid, idxi, idxj, P, eps):
-        if SCF.converger[0] == 0:
+                maskd, mask, atom_molid, pair_molid, idxi, idxj, P, eps,
+                scf_converger, use_sp2, scf_backward_eps):
+        if scf_converger[0] == 0:
             if P.dim() == 4:
                 P, notconverged = scf_forward0_u(M, w, gss, gpp, gsp, gp2, hsp,
                                    nHydro, nHeavy, nOccMO, nmol, molsize,
-                                   maskd, mask, idxi, idxj, P, eps, sp2=SCF.sp2,
-                                   alpha=SCF.converger[1])
+                                   maskd, mask, idxi, idxj, P, eps, sp2=use_sp2,
+                                   alpha=scf_converger[1])
             else:
                 P, notconverged = scf_forward0(M, w, gss, gpp, gsp, gp2, hsp,
                                    nHydro, nHeavy, nOccMO, nmol, molsize,
-                                   maskd, mask, idxi, idxj, P, eps, sp2=SCF.sp2,
-                                   alpha=SCF.converger[1])
-        elif SCF.converger[0] == 3: # KSA
+                                   maskd, mask, idxi, idxj, P, eps, sp2=use_sp2,
+                                   alpha=scf_converger[1])
+        elif scf_converger[0] == 3: # KSA
             P, notconverged = scf_forward3(M, w, gss, gpp, gsp, gp2, hsp,
                                    nHydro, nHeavy, nOccMO, nmol, molsize,
-                                   maskd, mask, idxi, idxj, P, eps, SCF.converger[1])
+                                   maskd, mask, idxi, idxj, P, eps, scf_converger[1])
         else:
-            if SCF.converger[0] == 1: # adaptive mixing
+            if scf_converger[0] == 1: # adaptive mixing
                 scf_forward = scf_forward1
-            elif SCF.converger[0] == 2: # adaptive mixing, then pulay
+            elif scf_converger[0] == 2: # adaptive mixing, then pulay
                 scf_forward = scf_forward2
             P, notconverged = scf_forward(M, w, gss, gpp, gsp, gp2, hsp, \
                                nHydro, nHeavy, nOccMO, nmol, molsize, \
-                               maskd, mask, idxi, idxj, P, eps, sp2=SCF.sp2)
+                               maskd, mask, idxi, idxj, P, eps, sp2=use_sp2)
         eps = torch.as_tensor(eps, dtype=M.dtype, device=M.device)
+        scf_backward_eps = torch.as_tensor(scf_backward_eps, dtype=M.dtype, device=M.device)
         ctx.save_for_backward(P, M, w, gss, gpp, gsp, gp2, hsp, \
                               nHydro, nHeavy, nOccMO, \
                               maskd, mask, idxi, idxj, eps, notconverged, \
-                              atom_molid, pair_molid)
+                              atom_molid, pair_molid, scf_backward_eps)
         
         return P, notconverged
     
@@ -727,7 +730,7 @@ class SCF(torch.autograd.Function):
         Pin, M, w, gss, gpp, gsp, gp2, hsp, \
         nHydro, nHeavy, nOccMO, \
         maskd, mask, idxi, idxj, eps, notconverged, \
-        atom_molid, pair_molid = ctx.saved_tensors
+        atom_molid, pair_molid, backward_eps = ctx.saved_tensors
         nmol = Pin.shape[0]
         molsize = Pin.shape[-1]//4
         grads, gvind = {}, []
@@ -746,9 +749,6 @@ class SCF(torch.autograd.Function):
             else:
                 F = fock(nmol, molsize, Pin, M, maskd, mask, idxi, idxj, w, gss, gpp, gsp, gp2, hsp)
                 Pout = sym_eig_trunc1(F, nHeavy, nHydro, nOccMO)[1]
-        backward_eps = SCF.scf_backward_eps.to(Pin.device)
-        converged = ~notconverged.detach() # scf forward converged
-        diverged = None # scf backward diverged
         
         if SCF_IMPLICIT_BACKWARD:
             ## THIS DOES NOT SUPPORT DOUBLE BACKWARD. MAY AS WELL STOP AUTOGRAD TAPE
@@ -761,6 +761,8 @@ class SCF(torch.autograd.Function):
                 gradients = agrad(Pout, gv, grad_outputs=u, retain_graph=True)
                 for t, i in enumerate(gvind): grads[i] = gradients[t]
         else:
+            converged = ~notconverged.detach() # scf forward converged
+            diverged = None # scf backward diverged
             gradients = [(grad_P,)]
             for k in range(SCF_BACKWARD_MAX_ITER+1):
                 grad0_max_prev = gradients[-1][0].abs().max(dim=-1)[0].max(dim=-1)[0]
@@ -816,7 +818,8 @@ class SCF(torch.autograd.Function):
         return grads[1], grads[2], grads[3], grads[4], grads[5], grads[6], grads[7], \
                None, None, None, \
                None, None, \
-               None, None, None, None, None, None, None, None
+               None, None, None, None, None, None, None, None, \
+               None, None, None
         
     
 
@@ -827,7 +830,8 @@ class SCF0(SCF):
         return None, None, None, None, None, None, None, \
                None, None, None, \
                None, None, \
-               None, None, None, None, None, None, None, None
+               None, None, None, None, None, None, None, None, \
+               None, None, None
 
 
 def scf_loop(const, molsize, nHeavy, nHydro, nOccMO, \
@@ -897,16 +901,17 @@ def scf_loop(const, molsize, nHeavy, nHydro, nOccMO, \
                                 set scf_converger=[0, alpha] or [1]\n""")
     #scf_backward 1, use recursive formula/implicit autodiff
     if scf_backward == 1:
-        scfapply = SCF(use_sp2=sp2, scf_converger=scf_converger, scf_backward_eps=scf_backward_eps).apply
+        scfapply = SCF().apply
     #scf_backward 0: ignore the gradient on density matrix
     elif scf_backward == 0:
-        scfapply = SCF0(use_sp2=sp2, scf_converger=scf_converger).apply
+        scfapply = SCF0().apply
 
     # apply_params = {k:pp[k] for k in apply_param_map}
     if scf_backward == 0 or scf_backward == 1:
         Pconv, notconverged = scfapply(M, w, gss, gpp, gsp, gp2, hsp,
                         nHydro, nHeavy, nOccMO, nmol, molsize, maskd, mask,
-                        atom_molid, pair_molid, idxi, idxj, P, eps)
+                        atom_molid, pair_molid, idxi, idxj, P, eps,
+                        sp2, scf_converger, scf_backward_eps)
     if notconverged.any():
         nnot = notconverged.type(torch.int).sum().data.item()
         warnings.warn("SCF for %d/%d molecules doesn't converge after %d iterations" % (nnot, nmol, MAX_ITER))

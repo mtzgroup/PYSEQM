@@ -911,7 +911,7 @@ def scf_loop(const, molsize, nHeavy, nHydro, nOccMO, \
         Pconv, notconverged = scfapply(M, w, gss, gpp, gsp, gp2, hsp,
                         nHydro, nHeavy, nOccMO, nmol, molsize, maskd, mask,
                         atom_molid, pair_molid, idxi, idxj, P, eps,
-                        sp2, scf_converger, scf_backward_eps)
+                        scf_converger, sp2, scf_backward_eps)
     if notconverged.any():
         nnot = notconverged.type(torch.int).sum().data.item()
         warnings.warn("SCF for %d/%d molecules doesn't converge after %d iterations" % (nnot, nmol, MAX_ITER))

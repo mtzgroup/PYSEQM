@@ -304,7 +304,7 @@ class Hamiltonian(torch.nn.Module):
         """
         beta = torch.cat((parameters['beta_s'].unsqueeze(1), parameters['beta_p'].unsqueeze(1)),dim=1)
         Kbeta = parameters.get('Kbeta', None)
-        F, e, P, Hcore, w, charge, notconverged = scf_loop(const=const,
+        F, e, C, P, Hcore, w, charge, notconverged = scf_loop(const=const,
                               molsize=molsize,
                               nHeavy=nHeavy,
                               nHydro=nHydro,
@@ -339,7 +339,7 @@ class Hamiltonian(torch.nn.Module):
                               scf_backward=self.scf_backward,
                               scf_backward_eps=self.scf_backward_eps)
         #
-        return F, e, P, Hcore, w, charge, notconverged
+        return F, e, C, P, Hcore, w, charge, notconverged
     
 
 class Energy(torch.nn.Module):
@@ -366,10 +366,10 @@ class Energy(torch.nn.Module):
         
         if callable(learned_parameters):
             adict = learned_parameters(molecule.species, molecule.coordinates)
-            parameters = self.packpar(Z, learned_params=adict)    
+            parameters = self.packpar(Z, learned_params=adict)
         else:
             parameters = self.packpar(Z, learned_params=learned_parameters)
-        F, e, P, Hcore, w, charge, notconverged = self.hamiltonian(molecule.const, molsize,
+        F, e, C, P, Hcore, w, charge, notconverged = self.hamiltonian(molecule.const, molsize,
                                                  nHeavy, nHydro, nocc, Z, maskd, mask, atom_molid,
                                                  pair_molid, idxi, idxj, ni,nj,xij,rij,
                                                  parameters, P0=P0)
@@ -443,7 +443,7 @@ class Energy(torch.nn.Module):
                                          gp2=parameters['g_p2'],
                                          hsp=parameters['h_sp'])
             Hf, Eiso_sum = heat_formation(molecule.const, nmol,atom_molid, Z, Etot, Eiso, flag = self.Hf_flag)
-            return Hf, Etot, Eelec, Enuc, Eiso_sum, EnucAB, e_gap, e, P, charge, notconverged
+            return Hf, Etot, Eelec, Enuc, Eiso_sum, EnucAB, e_gap, e, C, P, charge, notconverged
         else:
             #for computing force, Eelec.sum()+EnucAB.sum() and backward is enough
             #index_add is used in total_energy and heat_formation function
@@ -466,7 +466,7 @@ class Force(torch.nn.Module):
     def forward(self, molecule, learned_parameters=dict(), P0=None, *args, **kwargs):
 
         molecule.coordinates.requires_grad_(True)
-        Hf, Etot, Eelec, Enuc, Eiso, EnucAB, e_gap, e, D, charge, notconverged = \
+        Hf, Etot, Eelec, Enuc, Eiso, EnucAB, e_gap, e, C, D, charge, notconverged = \
             self.energy(molecule, learned_parameters=learned_parameters, all_terms=True, P0=P0, *args, **kwargs)
         
         # why detach? No grad on gap?
@@ -492,4 +492,4 @@ class Force(torch.nn.Module):
             molecule.coordinates.grad.zero_()
         
         # why detach? no external grads?
-        return force.detach(), D.detach(), Hf.detach(), Etot.detach(), Eelec.detach(), Enuc.detach(), Eiso.detach(), e, e_gap, charge, notconverged
+        return force.detach(), D.detach(), Hf.detach(), Etot.detach(), Eelec.detach(), Enuc.detach(), Eiso.detach(), e, e_gap, C, charge, notconverged

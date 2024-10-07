@@ -844,7 +844,7 @@ def scf_loop(const, molsize, nHeavy, nHydro, nOccMO, \
     # check hcore.py for the details of arguments
     eps : convergence criteria for density matrix on density matrix
     P : if provided, will be used as initial density matrix in scf loop
-    return : F, e, P, Hcore, w, v
+    return : F, e, v, P, Hcore, w
     """
     device = xij.device
     nmol = nHeavy.shape[0]
@@ -959,6 +959,6 @@ def scf_loop(const, molsize, nHeavy, nHydro, nOccMO, \
 #                charge[i,:norb[i],:nHeavy[i]] = v2[i][:norb[i],:(4*nHeavy[i])].reshape(norb[i],4,nHeavy[i]).sum(dim=1)
 #                charge[i,:norb[i],nHeavy[i]:(nHeavy[i]+nHydro[i])] = v2[i][:norb[i],(4*nHeavy[i]):(4*nHeavy[i]+nHydro[i])]
         charge = None
-        return F, e, Pconv, Hcore, w, charge, notconverged
+        return F, e, v, Pconv, Hcore, w, charge, notconverged
     else:
-        return F, None, Pconv, Hcore, w, None, notconverged
+        return F, None, None, Pconv, Hcore, w, None, notconverged

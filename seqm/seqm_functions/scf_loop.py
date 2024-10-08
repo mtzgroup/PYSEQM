@@ -959,6 +959,6 @@ def scf_loop(const, molsize, nHeavy, nHydro, nOccMO, \
 #                charge[i,:norb[i],:nHeavy[i]] = v2[i][:norb[i],:(4*nHeavy[i])].reshape(norb[i],4,nHeavy[i]).sum(dim=1)
 #                charge[i,:norb[i],nHeavy[i]:(nHeavy[i]+nHydro[i])] = v2[i][:norb[i],(4*nHeavy[i]):(4*nHeavy[i]+nHydro[i])]
         charge = None
-        return F, e, v, Pconv, Hcore, w, charge, notconverged
+        return F, e, torch.stack(v).transpose(-1,-2), Pconv, Hcore, w, charge, notconverged
     else:
         return F, None, None, Pconv, Hcore, w, None, notconverged

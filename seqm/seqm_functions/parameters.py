@@ -27,6 +27,7 @@ def params(method='MNDO', elements=[1,6,7,8],
         z=int(t[0])
         if z in elements:
             p[z,:] = torch.tensor([float(t[x]) for x in idx])
+        if z > max(elements): break
     f.close()
     return torch.nn.Parameter(p, requires_grad=False)
 
@@ -48,7 +49,8 @@ def rep_params(method='AM1_PDREP', elements=[1,6,7,8],
             my_par = {'alpha':float(t[2]), 'chi':float(t[3])}
             if z1 in elements and z2 in elements:
                 for p_i in parameters:
-                    p_dict[p_i][z1][z2] = my_par[p_i]
+                    p_dict[p_i][z1][z2] = p_dict[p_i][z2][z1] = my_par[p_i]
+            if z1 > max(elements) and z2 > max(elements): break
         f.close()
     return p_dict
 

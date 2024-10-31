@@ -53,7 +53,7 @@ def hcore(const,nmol,molsize, maskd, mask, idxi,idxj, ni,nj,xij,rij,
     #h1elec(idxi, idxj, ni, nj, xij, rij, zeta_a, zeta_b, beta, ispair=False) =>  beta_mu_nu
 
     #use uss upp to the diagonal block for hcore
-    zeta = torch.cat((zetas.unsqueeze(1), zetap.unsqueeze(1)),dim=1)
+    zeta = torch.cat((zetas.unsqueeze(1), zetap.unsqueeze(1)), dim=1)
     overlap_pairs = rij<=overlap_cutoff
     #di=th.zeros((npairs,4,4),dtype=dtype, device=device)
     di = torch.zeros((xij.shape[0], 4, 4),dtype=dtype, device=device)

@@ -1,9 +1,10 @@
 import torch
 from .seqm_functions.scf_loop import scf_loop
 from .seqm_functions.energy import *
-from .seqm_functions.parameters import params, rep_params
+from .seqm_functions.parameters import params, pair_params
 from torch.autograd import grad
 from .seqm_functions.constants import ev
+from copy import deepcopy as dcopy
 import os
 import time
 
@@ -34,6 +35,15 @@ parameterlist={'AM1':['U_ss', 'U_pp', 'zeta_s', 'zeta_p','beta_s', 'beta_p',
                        'Gaussian1_L', 'Gaussian2_L',
                        'Gaussian1_M', 'Gaussian2_M'
                       ]}
+
+atomic_parameters = dcopy(parameterlist)
+atomic_parameters['AM1_PDREP'] = ['U_ss', 'U_pp', 'zeta_s', 'zeta_p','beta_s', 'beta_p',
+                                  'g_ss', 'g_sp', 'g_pp', 'g_p2', 'h_sp',
+                                  'Gaussian1_K', 'Gaussian2_K', 'Gaussian3_K','Gaussian4_K',
+                                  'Gaussian1_L', 'Gaussian2_L', 'Gaussian3_L','Gaussian4_L',
+                                  'Gaussian1_M', 'Gaussian2_M', 'Gaussian3_M','Gaussian4_M']
+pair_parameters = {'AM1':[], 'AM1_PDREP':['alpha', 'chi'], 'MNDO':[], 'PM3':[]}
+
 
 class Parser(torch.nn.Module):
     """
@@ -248,8 +258,8 @@ class Pack_Parameters(torch.nn.Module):
         if self.method == 'AM1_PDREP':
             ignore_nuc_par = ['alpha', 'chi']
             self.rep_req = [p_n for p_n in ignore_nuc_par if p_n not in self.learned_list]
-            self.rep_dict = rep_params(method=self.method, elements=self.elements,
-                                       root_dir=self.filedir, parameters=self.rep_req)
+            self.rep_dict = pair_params(method=self.method, elements=self.elements,
+                                        root_dir=self.filedir, parameters=self.rep_req)
             method_elec = 'AM1'
         else:
             ignore_nuc_par, self.rep_req, method_elec = [], [], self.method

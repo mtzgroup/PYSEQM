@@ -1,7 +1,7 @@
 import torch
 from .seqm_functions.scf_loop import scf_loop
 from .seqm_functions.energy import *
-from .seqm_functions.parameters import params
+from .seqm_functions.parameters import params, rep_params
 from torch.autograd import grad
 from .seqm_functions.constants import ev
 import os
@@ -14,6 +14,13 @@ Semi-Emperical Quantum Mechanics: AM1/MNDO/PM3
 parameterlist={'AM1':['U_ss', 'U_pp', 'zeta_s', 'zeta_p','beta_s', 'beta_p',
                       'g_ss', 'g_sp', 'g_pp', 'g_p2', 'h_sp',
                       'alpha',
+                      'Gaussian1_K', 'Gaussian2_K', 'Gaussian3_K','Gaussian4_K',
+                      'Gaussian1_L', 'Gaussian2_L', 'Gaussian3_L','Gaussian4_L',
+                      'Gaussian1_M', 'Gaussian2_M', 'Gaussian3_M','Gaussian4_M'
+                     ],
+                'AM1_PDREP':['U_ss', 'U_pp', 'zeta_s', 'zeta_p','beta_s', 'beta_p',
+                      'g_ss', 'g_sp', 'g_pp', 'g_p2', 'h_sp',
+                      'alpha', 'chi',
                       'Gaussian1_K', 'Gaussian2_K', 'Gaussian3_K','Gaussian4_K',
                       'Gaussian1_L', 'Gaussian2_L', 'Gaussian3_L','Gaussian4_L',
                       'Gaussian1_M', 'Gaussian2_M', 'Gaussian3_M','Gaussian4_M'
@@ -238,19 +245,30 @@ class Pack_Parameters(torch.nn.Module):
             else os.path.abspath(os.path.dirname(__file__))+'/params/'
         self.parameters = parameterlist[self.method]
         self.required_list = []
+        if self.method == 'AM1_PDREP':
+            ignore_nuc_par = ['alpha', 'chi']
+            self.rep_req = [p_n for p_n in ignore_nuc_par if p_n not in self.learned_list]
+            self.rep_dict = rep_params(method=self.method, elements=self.elements,
+                                       root_dir=self.filedir, parameters=self.rep_req)
+            method_elec = 'AM1'
+        else:
+            ignore_nuc_par, self.rep_req, method_elec = [], [], self.method
         for i in self.parameters:
-            if i not in self.learned_list:
+            if i not in self.learned_list + ignore_nuc_par:
                 self.required_list.append(i)
         self.nrp = len(self.required_list)
-        self.p = params(method=self.method, elements=self.elements,root_dir=self.filedir,
+        self.p = params(method=method_elec, elements=self.elements, root_dir=self.filedir,
                  parameters=self.required_list)
-
+        
     def forward(self, Z, learned_params=dict()):
         """
         combine the learned_parames with other required parameters
         """
         for i in range(self.nrp):
             learned_params[self.required_list[i]] = self.p[Z,i] #.contiguous()
+        for p_i in self.rep_req:
+            p_dense = torch.tensor([[self.rep_dict[p_i][z1][z2] for z1 in Z.tolist()] for z2 in Z.tolist()])
+            learned_params[p_i] = torch.nn.Parameter(p_dense, requires_grad=False)
         return learned_params
 
 class Hamiltonian(torch.nn.Module):
@@ -350,8 +368,9 @@ class Energy(torch.nn.Module):
         super(Energy, self).__init__()
         self.seqm_parameters = seqm_parameters
         self.method = seqm_parameters['method']
-        self.parser = Parser(seqm_parameters)
         self.packpar = Pack_Parameters(seqm_parameters)
+        if seqm_parameters['method'] == 'AM1_PDREP': seqm_parameters['method'] = 'AM1'
+        self.parser = Parser(seqm_parameters)
         self.hamiltonian = Hamiltonian(seqm_parameters)
         self.Hf_flag = seqm_parameters.get('Hf_flag', True)
         self.uhf = seqm_parameters.get('UHF', False)
@@ -390,10 +409,9 @@ class Energy(torch.nn.Module):
             e_gap = None
             
         #nuclear energy
-        alpha = parameters['alpha']
-        if self.method=='MNDO':
-            parnuc = (alpha,)
-        elif self.method=='AM1':
+        if self.method == 'MNDO':
+            parnuc = (parameters['alpha'],)
+        elif self.method == 'AM1':
             K = torch.stack((parameters['Gaussian1_K'],
                              parameters['Gaussian2_K'],
                              parameters['Gaussian3_K'],
@@ -409,8 +427,8 @@ class Energy(torch.nn.Module):
                              parameters['Gaussian3_M'],
                              parameters['Gaussian4_M']),dim=1)
             #
-            parnuc = (alpha, K, L, M)
-        elif self.method=='PM3':
+            parnuc = (parameters['alpha'], K, L, M)
+        elif self.method == 'PM3':
             K = torch.stack((parameters['Gaussian1_K'],
                              parameters['Gaussian2_K']),dim=1)
             #
@@ -420,8 +438,22 @@ class Energy(torch.nn.Module):
             M = torch.stack((parameters['Gaussian1_M'],
                              parameters['Gaussian2_M']),dim=1)
             #
-            parnuc = (alpha, K, L, M)
-
+            parnuc = (parameters['alpha'], K, L, M)
+        elif self.method in ['AM1_PDREP', 'PM6']:
+            K = torch.stack((parameters['Gaussian1_K'],
+                             parameters['Gaussian2_K'],
+                             parameters['Gaussian3_K'],
+                             parameters['Gaussian4_K']),dim=1)
+            L = torch.stack((parameters['Gaussian1_L'],
+                             parameters['Gaussian2_L'],
+                             parameters['Gaussian3_L'],
+                             parameters['Gaussian4_L']),dim=1)
+            M = torch.stack((parameters['Gaussian1_M'],
+                             parameters['Gaussian2_M'],
+                             parameters['Gaussian3_M'],
+                             parameters['Gaussian4_M']),dim=1)
+            parnuc = (parameters['alpha'], parameters['chi'], K, L, M)
+        
         if 'g_ss_nuc' in parameters:
             g = parameters['g_ss_nuc']
             rho0a = 0.5 * ev / g[idxi]
@@ -433,7 +465,7 @@ class Energy(torch.nn.Module):
         EnucAB = pair_nuclear_energy(molecule.const, nmol, ni, nj, idxi, idxj, rij, gam=gam, method=self.method, parameters=parnuc)
         Eelec = elec_energy(P, F, Hcore)
         if all_terms:
-            Etot, Enuc = total_energy(nmol, pair_molid,EnucAB, Eelec)
+            Etot, Enuc = total_energy(nmol, pair_molid, EnucAB, Eelec)
             Eiso = elec_energy_isolated_atom(molecule.const, Z,
                                          uss=parameters['U_ss'],
                                          upp=parameters['U_pp'],

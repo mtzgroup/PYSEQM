@@ -24,8 +24,31 @@ def params(method='MNDO', elements=[1,6,7,8],
     idx = [header.index(item) for item in parameters]
     for l in f:
         t=l.strip().replace(' ', '').split(',')
-        id=int(t[0])
-        if id in elements:
-            p[id,:] = torch.tensor([float(t[x]) for x in idx])
+        z=int(t[0])
+        if z in elements:
+            p[z,:] = torch.tensor([float(t[x]) for x in idx])
     f.close()
     return torch.nn.Parameter(p, requires_grad=False)
+
+
+
+def rep_params(method='AM1_PDREP', elements=[1,6,7,8],
+               parameters=['alpha', 'chi'], root_dir='./params/MOPAC/'):
+
+    """
+    load diatomic core-core parameters and returns them as dictionary
+    """
+    #will directly use atomic number as array index just as in the params method
+    p_dict = {p_i:{e:{} for e in elements if e>0} for p_i in parameters}
+    if method in ['PM6', 'PM6_SP', 'AM1_PDREP']:
+        f = open(root_dir+"PWCCT_"+method+"_MOPAC.csv")
+        for l in f:
+            t = l.strip().replace(' ', '').split(',')
+            z1, z2 = int(t[0]), int(t[1])
+            my_par = {'alpha':float(t[2]), 'chi':float(t[3])}
+            if z1 in elements and z2 in elements:
+                for p_i in parameters:
+                    p_dict[p_i][z1][z2] = my_par[p_i]
+        f.close()
+    return p_dict
+

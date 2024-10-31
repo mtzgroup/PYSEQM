@@ -31,7 +31,11 @@ class Molecule(torch.nn.Module):
         self.Z, self.maskd, self.atom_molid, \
         self.mask, self.mask_l, self.pair_molid, \
         self.ni, self.nj, self.idxi, self.idxj, self.xij, self.rij = self.parser(self, return_mask_l=True, *args, **kwargs)
-
+        
+        real_elements = self.Z.unique()
+        elms_sorted = real_elements.sort(descending=True)[0].tolist()
+        self.element_map = torch.tensor([elms_sorted.index(z) for z in self.Z], requires_grad=False)
+        
         MASS = torch.as_tensor(self.const.mass)
         # put the padding virtual atom mass finite as for accelaration, F/m evaluation.
         MASS[0] = 1.0

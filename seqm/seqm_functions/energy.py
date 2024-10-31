@@ -93,25 +93,49 @@ def pair_nuclear_energy(const, nmol, ni, nj, idxi, idxj, rij, gam, method='AM1',
     rij: pair distance in atomic units, shape (npairs,)
     gam : (s^A s^A, s^B, s^B) = w[...,0,0], shape(npairs,): w ==> second return vaule of hcore
     parameters : tuple, (alpha,) or (alpha, K, L, M)
-    alpha : shape (natoms,)
-    K,L,M : guassian terms in PM3 or AM1, shape (natoms, 2 or 4)
+        alpha : shape (natoms,) or (natoms, natoms)
+        chi:    shape (natoms, natoms) for AM1_PDREP
+        K,L,M : guassian terms in PM3 or AM1, shape (natoms, 2 or 4)
     return nuclear interaction energy for each molecule, (nmol, )
     """
-    rija=rij*a0
+    rija = rij * a0
     tore = const.tore
-    alpha = parameters[0]
-    t1 = tore[ni]*tore[nj]*gam
-    #special case for N-H and O-H
-    XH = ((ni==7) | (ni==8)) & (nj==1)
-    t2 = torch.zeros_like(t1)
-    tmp = torch.exp(-alpha[idxi]*rija)
-    t2[~XH] = tmp[~XH]
-    t2[XH] = tmp[XH]*rija[XH]
-    t3 = torch.exp(-alpha[idxj]*rija)
+    ## t1 = ZA * ZB * <sA sA|sB sB>
+    t1 = tore[ni] * tore[nj] * gam  # tore = valence charge, not Z!
+    
+    if method == 'AM1_PDREP':
+        """
+        EnucAB = Vusr_AB + ZA * ZB * <sA sA|sB sB> * (1 + chi_AB * exp(-alpha_AB * R_AB))
+        """
+        alpha, chi, K, L, M = parameters
+        
+        # ultra short-range potential ("unpolarizable core-core") = 1e-8 * ((Z_A^1/3 + Z_B^1/3) / R_AB)^12
+        Vusr = 1e-8 * torch.pow( (torch.pow(ni, 1/3) + torch.pow(nj, 1/3)) / rija, 12)
+        
+        t2 = chi[idxi,idxj] * torch.exp(-alpha[idxi,idxj] * rija)
+#        t3_1 = tore[ni] * tore[nj] / rija
+#        t3_2 = torch.sum(K[idxi] * torch.exp(-L[idxi] * (rija.reshape((-1,1)) - M[idxi])**2), dim=1)
+#        t3_3 = torch.sum(K[idxj] * torch.exp(-L[idxj] * (rija.reshape((-1,1)) - M[idxj])**2), dim=1)
+#        t3 = t3_1 * (t3_2 + t3_3)
+        t3 = 0.
+        EnucAB = Vusr + t1 * (1.0 + t2) + t3
+        return EnucAB
+    else:
+        alpha = parameters[0]
+        # special cases for N-H and O-H
+        XH = ((ni==7) | (ni==8)) & (nj==1)
+        ## A = N or O and B = H: t2 = R_AB * exp(-alpha_A * R_AB)
+        ##                 else: t2 = exp(-alpha_A * R_AB)
+        t2 = torch.zeros_like(t1)
+        tmp = torch.exp(-alpha[idxi] * rija)
+        t2[~XH] = tmp[~XH]
+        t2[XH] = tmp[XH] * rija[XH]
+        ## t3 = exp(-alpha_B * R_AB)
+        t3 = torch.exp(-alpha[idxj] * rija)
     if method=='MNDO':
         #in mopac, rij is in unit of angstrom
-        #EnucAB = torch.abs(t1*(1.0+t2+t3))
-        EnucAB = t1*(1.0+t2+t3)
+        # EnucAB = ZA * ZB * <sA sA|sB sB> * (1 + t2 + exp(-alpha_B * R_AB))
+        EnucAB = t1 * (1.0 + t2 + t3)
     elif method=='PM3' or method=='AM1':
         #two gaussian terms for PM3
         # 3~4 terms for AM1
@@ -120,9 +144,10 @@ def pair_nuclear_energy(const, nmol, ni, nj, idxi, idxj, rij, gam, method='AM1',
         t4 = tore[ni]*tore[nj]/rija
         t5 = torch.sum(K[idxi]*torch.exp(-L[idxi]*(rija.reshape((-1,1))-M[idxi])**2),dim=1)
         t6 = torch.sum(K[idxj]*torch.exp(-L[idxj]*(rija.reshape((-1,1))-M[idxj])**2),dim=1)
-        EnucAB = t1*(1.0+t2+t3) + t4*(t5 + t6)
+        ## EnucAB = EnucAB[MNDO] + Z_A * A_B / R_AB * sum K_i exp(-L_i * (R_AB - M_i)^2)
+        EnucAB = t1 * (1.0 + t2 + t3) + t4 * (t5 + t6)
     else:
-        raise ValueError("Supported Method: MNDO, AM1, PM3")
+        raise ValueError("Supported Methods: MNDO, AM1, PM3, AM1_PDREP")
     return EnucAB
 
 def total_energy(nmol, pair_molid, EnucAB, Eelec):
@@ -137,8 +162,8 @@ def total_energy(nmol, pair_molid, EnucAB, Eelec):
     Eelec : electronic energy for each molecule, computed from elec_energy, shape (nmol)
 
     """
-    Enuc = torch.zeros((nmol,),dtype=EnucAB.dtype, device=EnucAB.device)
-    Enuc.index_add_(0,pair_molid, EnucAB)
+    Enuc = torch.zeros((nmol,), dtype=EnucAB.dtype, device=EnucAB.device)
+    Enuc.index_add_(0, pair_molid, EnucAB)
     Etot = Eelec + Enuc
     return Etot, Enuc
 

@@ -1,7 +1,7 @@
 import torch
 from .seqm_functions.scf_loop import scf_loop
 from .seqm_functions.energy import *
-from .seqm_functions.parameters import params, pair_params
+from .seqm_functions.parameters import atom_params, pair_params
 from torch.autograd import grad
 from .seqm_functions.constants import ev
 from copy import deepcopy as dcopy
@@ -36,12 +36,12 @@ parameterlist={'AM1':['U_ss', 'U_pp', 'zeta_s', 'zeta_p','beta_s', 'beta_p',
                        'Gaussian1_M', 'Gaussian2_M'
                       ]}
 
-atomic_parameters = dcopy(parameterlist)
-atomic_parameters['AM1_PDREP'] = ['U_ss', 'U_pp', 'zeta_s', 'zeta_p','beta_s', 'beta_p',
-                                  'g_ss', 'g_sp', 'g_pp', 'g_p2', 'h_sp',
-                                  'Gaussian1_K', 'Gaussian2_K', 'Gaussian3_K','Gaussian4_K',
-                                  'Gaussian1_L', 'Gaussian2_L', 'Gaussian3_L','Gaussian4_L',
-                                  'Gaussian1_M', 'Gaussian2_M', 'Gaussian3_M','Gaussian4_M']
+atom_parameters = dcopy(parameterlist)
+atom_parameters['AM1_PDREP'] = ['U_ss', 'U_pp', 'zeta_s', 'zeta_p','beta_s', 'beta_p',
+                                'g_ss', 'g_sp', 'g_pp', 'g_p2', 'h_sp',
+                                'Gaussian1_K', 'Gaussian2_K', 'Gaussian3_K','Gaussian4_K',
+                                'Gaussian1_L', 'Gaussian2_L', 'Gaussian3_L','Gaussian4_L',
+                                'Gaussian1_M', 'Gaussian2_M', 'Gaussian3_M','Gaussian4_M']
 pair_parameters = {'AM1':[], 'AM1_PDREP':['alpha', 'chi'], 'MNDO':[], 'PM3':[]}
 
 
@@ -254,31 +254,30 @@ class Pack_Parameters(torch.nn.Module):
             if 'parameter_file_dir' in seqm_parameters \
             else os.path.abspath(os.path.dirname(__file__))+'/params/'
         self.parameters = parameterlist[self.method]
-        self.required_list = []
-        if self.method == 'AM1_PDREP':
-            ignore_nuc_par = ['alpha', 'chi']
-            self.rep_req = [p_n for p_n in ignore_nuc_par if p_n not in self.learned_list]
-            self.rep_dict = pair_params(method=self.method, elements=self.elements,
-                                        root_dir=self.filedir, parameters=self.rep_req)
-            method_elec = 'AM1'
-        else:
-            ignore_nuc_par, self.rep_req, method_elec = [], [], self.method
+        self.atom_parameters = atom_parameters[self.method]
+        self.pair_parameters = pair_parameters[self.method]
+        self.atom_req_list, self.pair_req_list = [], []
         for i in self.parameters:
-            if i not in self.learned_list + ignore_nuc_par:
-                self.required_list.append(i)
-        self.nrp = len(self.required_list)
-        self.p = params(method=method_elec, elements=self.elements, root_dir=self.filedir,
-                 parameters=self.required_list)
+            if i in self.learned_list: continue
+            if i in self.atom_parameters:
+                self.atom_req_list.append(i)
+            elif i in self.pair_parameters:
+                self.pair_req_list.append(i)
+        self.atom_dict = atom_params(method=self.method, elements=self.elements,
+                                     root_dir=self.filedir, parameters=self.atom_req_list)
+        self.pair_dict = pair_params(method=self.method, elements=self.elements,
+                                     root_dir=self.filedir, parameters=self.pair_req_list)
         
     def forward(self, Z, learned_params=dict()):
         """
         combine the learned_parames with other required parameters
         """
-        for i in range(self.nrp):
-            learned_params[self.required_list[i]] = self.p[Z,i] #.contiguous()
-        for p_i in self.rep_req:
-            p_dense = torch.tensor([[self.rep_dict[p_i][z1][z2] for z1 in Z.tolist()] for z2 in Z.tolist()])
+        for p_i in self.atom_req_list:
+            p_dense = torch.tensor([self.atom_dict[p_i][z] for z in Z.tolist()]).contiguous()
             learned_params[p_i] = torch.nn.Parameter(p_dense, requires_grad=False)
+        for p_i in self.pair_req_list:
+            p_dense = torch.tensor([[self.pair_dict[p_i][z1][z2] for z1 in Z.tolist()] for z2 in Z.tolist()])
+            learned_params[p_i] = torch.nn.Parameter(p_dense, requires_grad=False).contiguous()
         return learned_params
 
 class Hamiltonian(torch.nn.Module):

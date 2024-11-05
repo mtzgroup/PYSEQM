@@ -961,6 +961,8 @@ def scf_loop(const, molsize, nHeavy, nHydro, nOccMO, \
         charge = None
         if type(v) is tuple:
             v = tuple(v_i.transpose(-1,-2) for v_i in v)
+        elif torch.is_tensor(v):
+            v = v.transpose(-1,-2)
         return F, e, v, Pconv, Hcore, w, charge, notconverged
     else:
         return F, None, None, Pconv, Hcore, w, None, notconverged

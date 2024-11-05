@@ -12,24 +12,37 @@ import time
 Semi-Emperical Quantum Mechanics: AM1/MNDO/PM3
 """
 
-parameterlist={'AM1':['U_ss', 'U_pp', 'zeta_s', 'zeta_p','beta_s', 'beta_p',
+parameterlist={'AM1':[
+                      ## electronic       
+                      'U_ss', 'U_pp', 'zeta_s', 'zeta_p','beta_s', 'beta_p',
                       'g_ss', 'g_sp', 'g_pp', 'g_p2', 'h_sp',
+                      ## core-core repulsion
                       'alpha',
                       'Gaussian1_K', 'Gaussian2_K', 'Gaussian3_K','Gaussian4_K',
                       'Gaussian1_L', 'Gaussian2_L', 'Gaussian3_L','Gaussian4_L',
                       'Gaussian1_M', 'Gaussian2_M', 'Gaussian3_M','Gaussian4_M'
                      ],
-                'AM1_PDREP':['U_ss', 'U_pp', 'zeta_s', 'zeta_p','beta_s', 'beta_p',
+                'AM1_PDREP':[
+                      ## electronic
+                      'U_ss', 'U_pp', 'zeta_s', 'zeta_p','beta_s', 'beta_p',
                       'g_ss', 'g_sp', 'g_pp', 'g_p2', 'h_sp',
-                      'alpha', 'chi',
+                      ## core-core repulsion
+                      'g_ss_nuc', 'alpha', 'chi',
                       'Gaussian1_K', 'Gaussian2_K', 'Gaussian3_K','Gaussian4_K',
                       'Gaussian1_L', 'Gaussian2_L', 'Gaussian3_L','Gaussian4_L',
                       'Gaussian1_M', 'Gaussian2_M', 'Gaussian3_M','Gaussian4_M'
                      ],
-                'MNDO':['U_ss', 'U_pp', 'zeta_s', 'zeta_p','beta_s', 'beta_p',
-                        'g_ss', 'g_sp', 'g_pp', 'g_p2', 'h_sp', 'alpha'],
-                'PM3':['U_ss', 'U_pp', 'zeta_s', 'zeta_p','beta_s', 'beta_p',
+                'MNDO':[
+                        ## electronic       
+                        'U_ss', 'U_pp', 'zeta_s', 'zeta_p','beta_s', 'beta_p',
+                        'g_ss', 'g_sp', 'g_pp', 'g_p2', 'h_sp',
+                        ## core-core repulsion
+                        'alpha'],
+                'PM3':[
+                       ## electronic
+                       'U_ss', 'U_pp', 'zeta_s', 'zeta_p','beta_s', 'beta_p',
                        'g_ss', 'g_sp', 'g_pp', 'g_p2', 'h_sp',
+                       ## core-core repulsion
                        'alpha',
                        'Gaussian1_K', 'Gaussian2_K',
                        'Gaussian1_L', 'Gaussian2_L',
@@ -38,7 +51,7 @@ parameterlist={'AM1':['U_ss', 'U_pp', 'zeta_s', 'zeta_p','beta_s', 'beta_p',
 
 atom_parameters = dcopy(parameterlist)
 atom_parameters['AM1_PDREP'] = ['U_ss', 'U_pp', 'zeta_s', 'zeta_p','beta_s', 'beta_p',
-                                'g_ss', 'g_sp', 'g_pp', 'g_p2', 'h_sp',
+                                'g_ss', 'g_sp', 'g_pp', 'g_p2', 'h_sp', 'g_ss_nuc',
                                 'Gaussian1_K', 'Gaussian2_K', 'Gaussian3_K','Gaussian4_K',
                                 'Gaussian1_L', 'Gaussian2_L', 'Gaussian3_L','Gaussian4_L',
                                 'Gaussian1_M', 'Gaussian2_M', 'Gaussian3_M','Gaussian4_M']
@@ -273,10 +286,12 @@ class Pack_Parameters(torch.nn.Module):
         combine the learned_parames with other required parameters
         """
         for p_i in self.atom_req_list:
-            p_dense = torch.tensor([self.atom_dict[p_i][z] for z in Z.tolist()]).contiguous()
+            p_dense = torch.tensor([self.atom_dict[p_i][z] for z in Z.tolist()],
+                                   device=Z.device).contiguous()
             learned_params[p_i] = torch.nn.Parameter(p_dense, requires_grad=False)
         for p_i in self.pair_req_list:
-            p_dense = torch.tensor([[self.pair_dict[p_i][z1][z2] for z1 in Z.tolist()] for z2 in Z.tolist()])
+            p_dense = torch.tensor([[self.pair_dict[p_i][z1][z2] for z1 in Z.tolist()]
+                                    for z2 in Z.tolist()], device=Z.device)
             learned_params[p_i] = torch.nn.Parameter(p_dense, requires_grad=False).contiguous()
         return learned_params
 
@@ -467,7 +482,7 @@ class Energy(torch.nn.Module):
             g = parameters['g_ss_nuc']
             rho0a = 0.5 * ev / g[idxi]
             rho0b = 0.5 * ev / g[idxj]
-            gam = ev / torch.sqrt(rij**2 + (rho0a + rho0b)**2)
+            gam = ev / torch.sqrt(rij*rij + (rho0a + rho0b)**2)
         else:
             gam = w[...,0,0]
 

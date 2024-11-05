@@ -110,15 +110,16 @@ def pair_nuclear_energy(const, nmol, ni, nj, idxi, idxj, rij, gam, method='AM1',
         alpha, chi, K, L, M = parameters
         
         # ultra short-range potential ("unpolarizable core-core") = 1e-8 * ((Z_A^1/3 + Z_B^1/3) / R_AB)^12
-        Vusr = 1e-8 * torch.pow( (torch.pow(ni, 1/3) + torch.pow(nj, 1/3)) / rija, 12)
+        Vucc = 1e-8 * torch.pow( (torch.pow(ni, 1/3) + torch.pow(nj, 1/3)) / rija, 12)
         
-        t2 = chi[idxi,idxj] * torch.exp(-alpha[idxi,idxj] * rija)
-#        t3_1 = tore[ni] * tore[nj] / rija
-#        t3_2 = torch.sum(K[idxi] * torch.exp(-L[idxi] * (rija.reshape((-1,1)) - M[idxi])**2), dim=1)
-#        t3_3 = torch.sum(K[idxj] * torch.exp(-L[idxj] * (rija.reshape((-1,1)) - M[idxj])**2), dim=1)
-#        t3 = t3_1 * (t3_2 + t3_3)
-        t3 = 0.
-        EnucAB = Vusr + t1 * (1.0 + t2) + t3
+        alpha2 = torch.square(alpha)
+        t2 = chi[idxi,idxj] * torch.exp(-alpha2[idxi,idxj] * (rija + 0.0003 * torch.pow(rija, 6)))
+        
+        t3_1 = tore[ni] * tore[nj] / rija
+        t3_2 = torch.sum(K[idxi] * torch.exp(-torch.square(L[idxi] * (rija.reshape((-1,1)) - M[idxi]))), dim=1)
+        t3_3 = torch.sum(K[idxj] * torch.exp(-torch.square(L[idxj] * (rija.reshape((-1,1)) - M[idxj]))), dim=1)
+        t3 = t3_1 * (t3_2 + t3_3)
+        EnucAB = Vucc + t1 * (1.0 + t2) + t3
         return EnucAB
     else:
         alpha = parameters[0]

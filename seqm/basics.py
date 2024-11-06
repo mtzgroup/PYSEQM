@@ -3,7 +3,7 @@ from .seqm_functions.scf_loop import scf_loop
 from .seqm_functions.energy import *
 from .seqm_functions.parameters import atom_params, pair_params
 from torch.autograd import grad
-from .seqm_functions.constants import ev
+from .seqm_functions.constants import ev, a0
 from copy import deepcopy as dcopy
 import os
 import time
@@ -482,7 +482,7 @@ class Energy(torch.nn.Module):
             g = parameters['g_ss_nuc']
             rho0a = 0.5 * ev / g[idxi]
             rho0b = 0.5 * ev / g[idxj]
-            gam = ev / torch.sqrt(rij*rij + (rho0a + rho0b)**2)
+            gam = ev / torch.sqrt(rij * rij + (rho0a + rho0b)**2)
         else:
             gam = w[...,0,0]
 
@@ -491,13 +491,13 @@ class Energy(torch.nn.Module):
         if all_terms:
             Etot, Enuc = total_energy(nmol, pair_molid, EnucAB, Eelec)
             Eiso = elec_energy_isolated_atom(molecule.const, Z,
-                                         uss=parameters['U_ss'],
-                                         upp=parameters['U_pp'],
-                                         gss=parameters['g_ss'],
-                                         gpp=parameters['g_pp'],
-                                         gsp=parameters['g_sp'],
-                                         gp2=parameters['g_p2'],
-                                         hsp=parameters['h_sp'])
+                                             uss=parameters['U_ss'],
+                                             upp=parameters['U_pp'],
+                                             gss=parameters['g_ss'],
+                                             gpp=parameters['g_pp'],
+                                             gsp=parameters['g_sp'],
+                                             gp2=parameters['g_p2'],
+                                             hsp=parameters['h_sp'])
             Hf, Eiso_sum = heat_formation(molecule.const, nmol,atom_molid, Z, Etot, Eiso, flag = self.Hf_flag)
             return Hf, Etot, Eelec, Enuc, Eiso_sum, EnucAB, e_gap, e, C, P, charge, notconverged
         else:

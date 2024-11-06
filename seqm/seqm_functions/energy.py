@@ -113,7 +113,19 @@ def pair_nuclear_energy(const, nmol, ni, nj, idxi, idxj, rij, gam, method='AM1',
         Vucc = 1e-8 * torch.pow( (torch.pow(ni, 1/3) + torch.pow(nj, 1/3)) / rija, 12)
         
         alpha2 = torch.square(alpha)
-        t2 = chi[idxi,idxj] * torch.exp(-alpha2[idxi,idxj] * (rija + 0.0003 * torch.pow(rija, 6)))
+        ## exception for N-H and O-H
+        isXH = ((ni==7) | (ni==8)) & (nj==1)
+        rexp = torch.zeros_like(rija)
+        rtmp = rija + 0.0003 * torch.pow(rija, 6)
+        rexp[~isXH] = rtmp[~isXH]
+        rexp[isXH] = torch.square(rija[isXH])
+        t2 = chi[idxi,idxj] * torch.exp(-alpha2[idxi,idxj] * rexp)
+        ## exception for C-C
+        isCC = (ni==6) & (nj == 6)
+        t2[isCC] = t2[isCC] + 9.28 * torch.exp(-5.98 * rija[isCC])
+        ## exception for Si-O
+        isSiO = (ni==14) & (nj==8)
+        t2[isSiO] = t2[isSiO] - 0.0007 * torch.exp( -torch.square(rija[isSiO] - 2.9) )
         
         t3_1 = tore[ni] * tore[nj] / rija
         t3_2 = torch.sum(K[idxi] * torch.exp(-torch.square(L[idxi] * (rija.reshape((-1,1)) - M[idxi]))), dim=1)

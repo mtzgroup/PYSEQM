@@ -67,7 +67,7 @@ def pair_params(method='AM1_PDREP', elements=[1,6,7,8],
         for l in f:
             t = l.strip().replace(' ', '').split(',')
             z1, z2 = int(t[0]), int(t[1])
-            my_par = {'alpha':float(t[2]), 'chi':float(t[3])}
+            my_par = {'alpha':float(t[2]), 'chi':float(t[3]), 'mu':float(t[4]), 'nu':float(t[5])}
             if z1 in elements and z2 in elements:
                 for p_i in parameters:
                     p_dict[p_i][z1][z2] = p_dict[p_i][z2][z1] = my_par[p_i]

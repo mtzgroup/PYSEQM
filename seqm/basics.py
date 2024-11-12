@@ -27,7 +27,7 @@ parameterlist={'AM1':[
                       'U_ss', 'U_pp', 'zeta_s', 'zeta_p','beta_s', 'beta_p',
                       'g_ss', 'g_sp', 'g_pp', 'g_p2', 'h_sp',
                       ## core-core repulsion
-                      'g_ss_nuc', 'alpha', 'chi',
+                      'g_ss_nuc', 'alpha', 'chi', 'mu', 'nu',
                       'Gaussian1_K', 'Gaussian2_K', 'Gaussian3_K','Gaussian4_K',
                       'Gaussian1_L', 'Gaussian2_L', 'Gaussian3_L','Gaussian4_L',
                       'Gaussian1_M', 'Gaussian2_M', 'Gaussian3_M','Gaussian4_M'
@@ -55,7 +55,7 @@ atom_parameters['AM1_PDREP'] = ['U_ss', 'U_pp', 'zeta_s', 'zeta_p','beta_s', 'be
                                 'Gaussian1_K', 'Gaussian2_K', 'Gaussian3_K','Gaussian4_K',
                                 'Gaussian1_L', 'Gaussian2_L', 'Gaussian3_L','Gaussian4_L',
                                 'Gaussian1_M', 'Gaussian2_M', 'Gaussian3_M','Gaussian4_M']
-pair_parameters = {'AM1':[], 'AM1_PDREP':['alpha', 'chi'], 'MNDO':[], 'PM3':[]}
+pair_parameters = {'AM1':[], 'AM1_PDREP':['alpha', 'chi', 'mu', 'nu'], 'MNDO':[], 'PM3':[]}
 
 
 class Parser(torch.nn.Module):
@@ -476,7 +476,8 @@ class Energy(torch.nn.Module):
                              parameters['Gaussian2_M'],
                              parameters['Gaussian3_M'],
                              parameters['Gaussian4_M']),dim=1)
-            parnuc = (parameters['alpha'], parameters['chi'], K, L, M)
+            parnuc = (parameters['alpha'], parameters['chi'], parameters['mu'],
+                      parameters['nu'], K, L, M)
         
         if 'g_ss_nuc' in parameters:
             g = parameters['g_ss_nuc']

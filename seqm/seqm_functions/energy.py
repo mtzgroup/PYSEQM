@@ -107,31 +107,41 @@ def pair_nuclear_energy(const, nmol, ni, nj, idxi, idxj, rij, gam, method='AM1',
         """
         EnucAB = Vusr_AB + ZA * ZB * <sA sA|sB sB> * (1 + chi_AB * exp(-alpha_AB * R_AB))
         """
-        alpha, chi, K, L, M = parameters
+        alpha, chi, mu, nu, K, L, M = parameters
         
         # ultra short-range potential ("unpolarizable core-core") = 1e-8 * ((Z_A^1/3 + Z_B^1/3) / R_AB)^12
         Vucc = 1e-8 * torch.pow( (torch.pow(ni, 1/3) + torch.pow(nj, 1/3)) / rija, 12)
         
         alpha2 = torch.square(alpha)
+#        nu2 = torch.square(nu)
+
+        ## TEST 1: pair-dependent shift in usual exponential screening factor
+#        t2 = 1 + chi[idxi,idxj] * torch.exp(-alpha2[idxi,idxj] * (rija + mu[idxi,idxj]))
+        ## TEST 2: linear combination of exponentials as screening factor
+#        t2 = 1 + chi[idxi,idxj] * torch.exp(-alpha2[idxi,idxj] * rija) + mu[idxi,idxj] * torch.exp(-nu2[idxi,idxj] * rija)
+        ## TEST 3: Coulomb interaction between Gaussians damped by Gaussian overlap
+#        t2 = chi[idxi,idxj] * torch.erf(alpha2[idxi,idxj] * rija) * torch.exp(-nu2[idxi,idxj] * rija*rija)
+
         ## exception for N-H and O-H
         isXH = ((ni==7) | (ni==8)) & (nj==1)
         rexp = torch.zeros_like(rija)
         rtmp = rija + 0.0003 * torch.pow(rija, 6)
         rexp[~isXH] = rtmp[~isXH]
         rexp[isXH] = torch.square(rija[isXH])
-        t2 = chi[idxi,idxj] * torch.exp(-alpha2[idxi,idxj] * rexp)
+        t2 = 1. + chi[idxi,idxj] * torch.exp(-alpha2[idxi,idxj] * rexp)
         ## exception for C-C
         isCC = (ni==6) & (nj == 6)
         t2[isCC] = t2[isCC] + 9.28 * torch.exp(-5.98 * rija[isCC])
         ## exception for Si-O
         isSiO = (ni==14) & (nj==8)
         t2[isSiO] = t2[isSiO] - 0.0007 * torch.exp( -torch.square(rija[isSiO] - 2.9) )
-        
+        t12 = t1 * t2
+                
         t3_1 = tore[ni] * tore[nj] / rija
         t3_2 = torch.sum(K[idxi] * torch.exp(-torch.square(L[idxi] * (rija.reshape((-1,1)) - M[idxi]))), dim=1)
         t3_3 = torch.sum(K[idxj] * torch.exp(-torch.square(L[idxj] * (rija.reshape((-1,1)) - M[idxj]))), dim=1)
         t3 = t3_1 * (t3_2 + t3_3)
-        EnucAB = Vucc + t1 * (1.0 + t2) + t3
+        EnucAB = Vucc + t12 + t3
         return EnucAB
     else:
         alpha = parameters[0]

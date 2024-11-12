@@ -153,6 +153,7 @@ def scf_forward1(M, w, gss, gpp, gsp, gp2, hsp, nHydro, nHeavy, nOccMO,
     """
     adaptive mixing algorithm, see cnvg.f
     """
+    raise NotImplementedError("Adaptive mixing seems to be broken!")
     nDirect1 = 2
     notconverged = torch.ones(nmol,dtype=torch.bool, device=M.device)
     

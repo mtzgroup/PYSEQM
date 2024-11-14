@@ -838,7 +838,7 @@ class SCF0(SCF):
 def scf_loop(const, molsize, nHeavy, nHydro, nOccMO, \
             maskd, mask, atom_molid, pair_molid, idxi, idxj, ni, nj, xij, rij, Z, \
             zetas, zetap, uss, upp , gss, gsp, gpp, gp2, hsp, beta, Kbeta=None, \
-            eps=1e-4, P=None, sp2=[False], scf_converger=[1], eig=False, scf_backward=0, \
+            eps=1e-4, P=None, sp2=[False], scf_converger=[0,0.15], eig=False, scf_backward=0, \
             scf_backward_eps=1e-2):
     """
     SCF loop

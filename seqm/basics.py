@@ -317,6 +317,7 @@ class Hamiltonian(torch.nn.Module):
         # 0: ignore gradient on density matrix from Hellmann Feymann Theorem,
         # 1: use recursive formula go back through scf loop
         # 2: direct backprop through SCF cycle
+        self.ivans_beta = seqm_parameters.get('ivans_beta', False)
     
     def forward(self, const, molsize, nHeavy, nHydro, nocc, Z, maskd, mask, atom_molid, pair_molid, idxi, idxj, ni,nj,xij,rij, parameters, P0=None):
         """
@@ -379,7 +380,8 @@ class Hamiltonian(torch.nn.Module):
                               scf_converger=self.scf_converger,
                               eig=self.eig,
                               scf_backward=self.scf_backward,
-                              scf_backward_eps=self.scf_backward_eps)
+                              scf_backward_eps=self.scf_backward_eps,
+                              ivans_beta=self.ivans_beta)
         #
         return F, e, C, P, Hcore, w, charge, notconverged
     

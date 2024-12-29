@@ -18,7 +18,7 @@ import time
 CHECK_DEGENERACY = False
 
 
-def make_dm_guess(molecule, seqm_parameters, mix_homo_lumo=False, mix_coeff=0.4, learned_parameters=dict(), overwrite_existing_dm=False):
+def make_dm_guess(molecule, seqm_parameters, mix_homo_lumo=False, mix_coeff=0.4, learned_parameters=dict(), overwrite_existing_dm=False, ivans_beta=False):
     sym_eigh = degen_symeig.apply if DEGEN_EIGENSOLVER else pytorch_symeig
     packpar = Pack_Parameters(seqm_parameters).to(molecule.coordinates.device)
     
@@ -53,7 +53,8 @@ def make_dm_guess(molecule, seqm_parameters, mix_homo_lumo=False, mix_coeff=0.4,
                      gp2,
                      hsp,
                      beta,
-                     Kbeta=Kbeta)
+                     Kbeta=Kbeta,
+                     ivans_beta=ivans_beta)
     
     if not torch.is_tensor(molecule.dm) or overwrite_existing_dm==True:
         print('Reinitializing DM')

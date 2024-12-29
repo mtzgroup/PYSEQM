@@ -708,6 +708,7 @@ class SCF(torch.autograd.Function):
             P, notconverged = scf_forward(M, w, gss, gpp, gsp, gp2, hsp, \
                                nHydro, nHeavy, nOccMO, nmol, molsize, \
                                maskd, mask, idxi, idxj, P, eps, sp2=use_sp2)
+        
         eps = torch.as_tensor(eps, dtype=M.dtype, device=M.device)
         scf_backward_eps = torch.as_tensor(scf_backward_eps, dtype=M.dtype, device=M.device)
         ctx.save_for_backward(P, M, w, gss, gpp, gsp, gp2, hsp, \
@@ -839,7 +840,7 @@ def scf_loop(const, molsize, nHeavy, nHydro, nOccMO, \
             maskd, mask, atom_molid, pair_molid, idxi, idxj, ni, nj, xij, rij, Z, \
             zetas, zetap, uss, upp , gss, gsp, gpp, gp2, hsp, beta, Kbeta=None, \
             eps=1e-4, P=None, sp2=[False], scf_converger=[0,0.15], eig=False, scf_backward=0, \
-            scf_backward_eps=1e-2):
+            scf_backward_eps=1e-2, ivans_beta=False):
     """
     SCF loop
     # check hcore.py for the details of arguments
@@ -853,7 +854,10 @@ def scf_loop(const, molsize, nHeavy, nHydro, nOccMO, \
     if const.do_timing: t0 = time.time()
     M, w = hcore(const, nmol, molsize, maskd, mask, idxi, idxj, ni, nj, xij, 
                  rij, Z, zetas, zetap, uss, upp , gss, gpp, gp2, hsp, beta, 
-                 Kbeta=Kbeta)
+                 nHeavy, nHydro, nOccMO,
+                 Kbeta=Kbeta,
+                 ivans_beta=ivans_beta,
+                )
     
     if const.do_timing:
         if torch.cuda.is_available(): torch.cuda.synchronize()

@@ -1,25 +1,22 @@
 import torch
-from torch.autograd import grad
 from .fock import fock
 from .fock_u_batch import fock_u_batch
 from .hcore import hcore
-from .energy import elec_energy
-from .SP2 import SP2
-from .fermi_q import Fermi_Q
-from .G_XL_LR import G
-from seqm.seqm_functions.canon_dm_prt import Canon_DM_PRT
 from seqm.basics import Pack_Parameters
 from .pack import *
 from .diag import DEGEN_EIGENSOLVER, degen_symeig, pytorch_symeig#sym_eig_trunc, sym_eig_trunc1, pseudo_diag
-import warnings
-import time
 
 
 CHECK_DEGENERACY = False
 
 
-def make_dm_guess(molecule, seqm_parameters, mix_homo_lumo=False, mix_coeff=0.4, learned_parameters=dict(), overwrite_existing_dm=False, ivans_beta=False):
+def make_dm_guess(molecule, seqm_parameters, mix_homo_lumo=False, mix_coeff=0.4,
+                  learned_parameters=dict(), overwrite_existing_dm=False,
+                  from_hcore=True, ivans_beta=False):
     sym_eigh = degen_symeig.apply if DEGEN_EIGENSOLVER else pytorch_symeig
+    
+    dtype  = molecule.xij.dtype
+    device = molecule.xij.device
     packpar = Pack_Parameters(seqm_parameters).to(molecule.coordinates.device)
     
     if callable(learned_parameters):
@@ -41,95 +38,78 @@ def make_dm_guess(molecule, seqm_parameters, mix_homo_lumo=False, mix_coeff=0.4,
     hsp = parameters['h_sp']
 
     nmol = molecule.nHeavy.shape[0]
-    tore = molecule.const.tore
-    
-    M, w = hcore(molecule.const, nmol, molecule.molsize, molecule.maskd, molecule.mask, molecule.idxi, molecule.idxj, molecule.ni,molecule.nj,molecule.xij,molecule.rij, molecule.Z, \
-                     zetas,
-                     zetap,
-                     uss,
-                     upp,
-                     gss,
-                     gpp,
-                     gp2,
-                     hsp,
-                     beta,
-                     Kbeta=Kbeta,
-                     ivans_beta=ivans_beta)
     
     if not torch.is_tensor(molecule.dm) or overwrite_existing_dm==True:
-        print('Reinitializing DM')
-        P0 = torch.zeros_like(M)  # density matrix
-        P0[molecule.maskd[molecule.Z>1],0,0] = tore[molecule.Z[molecule.Z>1]]/4.0
-        P0[molecule.maskd,1,1] = P0[molecule.maskd,0,0]
-        P0[molecule.maskd,2,2] = P0[molecule.maskd,0,0]
-        P0[molecule.maskd,3,3] = P0[molecule.maskd,0,0]
-        P0[molecule.maskd[molecule.Z==1],0,0] = 1.0
-        #print('P0:\n', P0)
-        #P0 += torch.randn(P0.shape,dtype=P0.dtype, device=P0.device)*0.01
-        P = P0.reshape(nmol, molecule.molsize, molecule.molsize, 4, 4) \
-            .transpose(2, 3) \
-            .reshape(nmol, 4*molecule.molsize, 4*molecule.molsize)
+        nH = torch.count_nonzero(molecule.species == 1)
+        orb_species = molecule.species.repeat_interleave(4,1).flatten()
+        diags = torch.zeros_like(orb_species, dtype=dtype)
+        diags[orb_species > 1] = molecule.const.tore[orb_species[orb_species > 1]] / 4.0
+        diags[orb_species == 1] = torch.tensor([1.,0.,0.,0.], dtype=dtype).repeat(nH)
+        diags_mol = diags.reshape(molecule.nmol, -1)
         if molecule.nocc.dim() == 2:
-            P = torch.stack((0.5 * P, 0.5 * P), dim=1)
+            diags_mol = torch.stack((0.5 * diags_mol, 0.5 * diags_mol), dim=1)
+            P_blank = torch.zeros((molecule.nmol, 2, 4*molecule.molsize, 4*molecule.molsize))
+        else:
+            P_blank = torch.zeros((molecule.nmol, 4*molecule.molsize, 4*molecule.molsize))
+        P = P_blank.diagonal_scatter(diags_mol, dim1=-2, dim2=-1)
         molecule.dm = P
+    P = molecule.dm
+    if not from_hcore: return P, None
+    
+    M, w = hcore(molecule.const, molecule.nmol, molecule.molsize, molecule.maskd, molecule.mask,
+                 molecule.idxi, molecule.idxj, molecule.ni, molecule.nj, molecule.xij,
+                 molecule.rij, molecule.Z, zetas, zetap, uss, upp, gss, gpp, gp2, hsp,
+                 beta, molecule.nHeavy, molecule.nHydro, molecule.nocc, Kbeta=Kbeta,
+                 ivans_beta=ivans_beta)
+    
     if molecule.nocc.dim() == 2:
-        P = molecule.dm
+        x = fock_u_batch(molecule.nmol, molecule.molsize, P, M, molecule.maskd, molecule.mask,
+                         molecule.idxi, molecule.idxj, w, gss, gpp, gsp, gp2, hsp)
+        
+        nheavyatom = molecule.nHeavy.repeat_interleave(2)
+        nH = molecule.nHydro.repeat_interleave(2)
+        nocc = molecule.nocc.flatten()
+        #Gershgorin circle theorem estimate upper bounds of eigenvalues  
+        x_orig_shape = x.size()
+        x0 = pack(x, nheavyatom, nH)
+        nmol, size, _ = x0.shape
+        
+        aii = x0.diagonal(dim1=1, dim2=2)
+        ri = torch.sum(torch.abs(x0), dim=2)-torch.abs(aii)
+        hN = torch.max(aii + ri, dim=1)[0]
+        dE = hN - torch.min(aii - ri, dim=1)[0] #(maximal - minimal) get range
+        norb = nheavyatom * 4 + nH
+        pnorb = size - norb
+        nn = torch.max(pnorb).item()
+        dx = 0.005
+        mutipler = torch.arange(1.0+dx, 1.0+nn*dx+dx, dx, dtype=dtype, device=device)[:nn]
+        ind = torch.arange(size, dtype=torch.int64, device=device)
+        cond = pnorb>0
+        for i in range(nmol):
+            if cond[i]:
+                x0[i,ind[norb[i]:], ind[norb[i]:]] = mutipler[:pnorb[i]]*dE[i]+hN[i]
+        try:
+            e0, v = sym_eigh(x0)
+        except:
+            if torch.isnan(x0).any(): print(x0)
+            #print(x0.detach().data.numpy())
+            e0, v = sym_eigh(x0)
+        e = torch.zeros((nmol, x.shape[-1]), dtype=dtype, device=device)
+        e[...,:size] = e0
+        for i in range(nmol):
+            if cond[i]: e[i,norb[i]:size] = 0.0
+        
+        # $$$ the code below can and SHOULD be optimized. Too many reshapes
+        e = e.reshape(x_orig_shape[0:3])
+        
         if mix_homo_lumo:
-            x = fock_u_batch(nmol, molecule.molsize, P, M, molecule.maskd, molecule.mask, molecule.idxi, molecule.idxj, w, gss, gpp, gsp, gp2, hsp)
-            Hcore = M.reshape(nmol, molecule.molsize, molecule.molsize, 4, 4) \
-                     .transpose(2, 3) \
-                     .reshape(nmol, 4*molecule.molsize, 4*molecule.molsize)
-            
-            # modified sym_eig_trunc below:
-            dtype = x.dtype
-            device = x.device
-            
-            nheavyatom = molecule.nHeavy.repeat_interleave(2)
-            nH = molecule.nHydro.repeat_interleave(2)
-            nocc = molecule.nocc.flatten()
-            #Gershgorin circle theorem estimate upper bounds of eigenvalues  
-            x_orig_shape = x.size()
-            x0 = pack(x, nheavyatom, nH)
-            nmol, size, _ = x0.shape
-            
-            aii = x0.diagonal(dim1=1, dim2=2)
-            ri = torch.sum(torch.abs(x0), dim=2)-torch.abs(aii)
-            hN = torch.max(aii + ri, dim=1)[0]
-            dE = hN - torch.min(aii - ri, dim=1)[0] #(maximal - minimal) get range
-            norb = nheavyatom * 4 + nH
-            pnorb = size - norb
-            nn = torch.max(pnorb).item()
-            dx = 0.005
-            mutipler = torch.arange(1.0+dx, 1.0+nn*dx+dx, dx, dtype=dtype, device=device)[:nn]
-            ind = torch.arange(size, dtype=torch.int64, device=device)
-            cond = pnorb>0
-            for i in range(nmol):
-                if cond[i]:
-                    x0[i,ind[norb[i]:], ind[norb[i]:]] = mutipler[:pnorb[i]]*dE[i]+hN[i]
-            try:
-                e0, v = sym_eigh(x0)
-            except:
-                if torch.isnan(x0).any(): print(x0)
-                #print(x0.detach().data.numpy())
-                e0, v = sym_eigh(x0)
-            e = torch.zeros((nmol, x.shape[-1]), dtype=dtype, device=device)
-            e[...,:size] = e0
-            for i in range(nmol):
-                if cond[i]: e[i,norb[i]:size] = 0.0
-            
-            # $$$ the code below can and SHOULD be optimized. Too many reshapes
-            
-            #print(v.shape)
-            e = e.reshape(x_orig_shape[0:3])
             v = v.reshape(int(v.shape[0]/2), 2, v.shape[1], v.shape[2])
-            #print(v.shape)
-            
             v_lumo = v[:,0].gather(2, molecule.nocc[:,0].unsqueeze(0).unsqueeze(0).T.repeat(1,v.shape[-1],1))
             v_homo = v[:,0].gather(2, molecule.nocc[:,0].unsqueeze(0).unsqueeze(0).T.repeat(1,v.shape[-1],1)-1)
 
             mix_coeff = torch.tensor([mix_coeff], device=device)
             
-            v_a_homo = (1 - mix_coeff) * v_homo + (mix_coeff) * v_lumo
+            v_a_homo = (1 - mix_coeff) * v_homo + mix_coeff * v_lumo
             #v_a_lumo = -(mix_coeff)*v_homo + (1-mix_coeff)*v_lumo
 
             #v_b_homo = (1-mix_coeff)*v_homo - torch.sin(mix_coeff)*v_lumo
@@ -143,25 +123,65 @@ def make_dm_guess(molecule, seqm_parameters, mix_homo_lumo=False, mix_coeff=0.4,
             
             v = v.reshape(int(v.shape[0]*2),v.shape[2],v.shape[3])
             
-            if CHECK_DEGENERACY:
-                t = torch.stack(list(map(lambda a,b,n : construct_P(a, b, n), e, v, nocc)))
-            else:
-                #list(map(lambda a,n : print('norm', torch.norm(v, dim=0), n), v, nocc))
-                #print(torch.norm())
-                t = 2.0*torch.stack(list(map(lambda a,n : torch.matmul(a[:,:n], a[:,:n].transpose(0,1)), v, nocc)))
-
-            # print(t.shape)
-            # print(nheavyatom.shape)
-            # print(nH.shape)
-            # print(x.shape)
-            P = unpack(t, nheavyatom, nH, x.shape[-1])
-            
-            v = v.reshape(int(v.shape[0]/2),2,v.shape[1],v.shape[2])
-            P = P.reshape(x_orig_shape)
-            molecule.dm = P / 2
-            return P, v
+        if CHECK_DEGENERACY:
+            t = torch.stack(list(map(lambda a,b,n : construct_P(a, b, n), e, v, nocc)))
         else:
-            return P, None
+            t = 2.0*torch.stack(list(map(lambda a,n : torch.matmul(a[:,:n], a[:,:n].transpose(0,1)), v, nocc)))
+
+        P = unpack(t, nheavyatom, nH, x.shape[-1])
+        v = v.reshape(int(v.shape[0]/2),2,v.shape[1],v.shape[2])
+        P = P.reshape(x_orig_shape)
+        molecule.dm = P / 2
+        return P, v
     else:
-        return P, None
+        x = fock(nmol, molecule.molsize, P, M, molecule.maskd, molecule.mask, molecule.idxi,
+                 molecule.idxj, w, gss, gpp, gsp, gp2, hsp)
+
+        #Gershgorin circle theorem estimate upper bounds of eigenvalues  
+        x0 = pack(x, molecule.nHeavy, molecule.nHydro)
+        nmol, size, _ = x0.shape
+
+        aii = x0.diagonal(dim1=1, dim2=2)
+        ri = torch.sum(torch.abs(x0), dim=2) - torch.abs(aii)
+        hN = torch.max(aii + ri, dim=1)[0]
+        dE = hN - torch.min(aii - ri, dim=1)[0] #(maximal - minimal) get range
+        norb = molecule.nHeavy * 4 + molecule.nHydro
+        pnorb = size - norb
+        nn = torch.max(pnorb).item()
+        dx = 0.005
+        mutipler = torch.arange(1.0+dx, 1.0+nn*dx+dx, dx, dtype=dtype, device=device)[:nn]
+        ind = torch.arange(size, dtype=torch.int64, device=device)
+        cond = pnorb>0
+        for i in range(nmol):
+            if cond[i]:
+                x0[i,ind[norb[i]:], ind[norb[i]:]] = mutipler[:pnorb[i]] * dE[i] + hN[i]
+        try:
+            e0, v = sym_eigh(x0)
+        except:
+            if torch.isnan(x0).any(): raise torch._C._LinAlgError("Input to eigh contains NaN")
+        
+        e = torch.zeros((nmol, x.shape[-1]), dtype=dtype, device=device)
+        e[...,:size] = e0
+        for i in range(nmol):
+            if cond[i]: e[i,norb[i]:size] = 0.0
+        
+        if mix_homo_lumo:
+            ## TODO
+            v_lumo = v.gather(2, molecule.nocc.unsqueeze(0).unsqueeze(0).T.repeat(1,v.shape[-1],1))
+            v_homo = v.gather(2, molecule.nocc.unsqueeze(0).unsqueeze(0).T.repeat(1,v.shape[-1],1)-1)
+
+            mix_coeff = torch.tensor([mix_coeff], device=device)
+
+            v_mix = (1 - mix_coeff) * v_homo + mix_coeff * v_lumo
+            v.scatter_(2, molecule.nocc.unsqueeze(0).unsqueeze(0).T.repeat(1,v.shape[-1],1)-1, v_mix)
+            ## END TODO
+            
+        if CHECK_DEGENERACY:
+            t = torch.stack(list(map(lambda a,b,n : construct_P(a, b, n), e, v, molecule.nocc)))
+        else:
+            t = 2.0*torch.stack(list(map(lambda a,n : torch.matmul(a[:,:n], a[:,:n].transpose(0,1)), v, molecule.nocc)))
+
+        P = unpack(t, molecule.nHeavy, molecule.nHydro, x.shape[-1])
+        molecule.dm = P
+        return P, v
     

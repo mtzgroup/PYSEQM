@@ -128,6 +128,10 @@ def pair_nuclear_energy(const, nmol, ni, nj, idxi, idxj, rij, gam, method='AM1',
         rtmp = rija + 0.0003 * torch.pow(rija, 6)
         rexp[~isXH] = rtmp[~isXH]
         rexp[isXH] = torch.square(rija[isXH])
+#        rexp = rija
+#        isHH = (ni==1) & (nj==1)
+#        t2_HH = 1. + chi[idxi,idxj] * torch.exp(-alpha2[idxi,idxj] * rexp)
+#        t2[isHH] = t2_HH[isHH]
         t2 = 1. + chi[idxi,idxj] * torch.exp(-alpha2[idxi,idxj] * rexp)
         ## exception for C-C
         isCC = (ni==6) & (nj == 6)

@@ -6,7 +6,7 @@ import torch
 
 def packone(x, nho, nHydro, norb):
     x0 = torch.zeros((norb,norb), dtype=x.dtype, device=x.device)
-    x0[:nho,:nho]=x[:nho,:nho]
+    x0[:nho,:nho] = x[:nho,:nho]
     x0[:nho, nho:(nho+nHydro)] = x[:nho,nho:(nho+4*nHydro):4]
     x0[nho:(nho+nHydro),nho:(nho+nHydro)] = x[nho:(nho+4*nHydro):4,nho:(nho+4*nHydro):4]
     x0[nho:(nho+nHydro), :nho] = x[nho:(nho+4*nHydro):4, :nho]

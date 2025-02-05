@@ -160,6 +160,7 @@ class Parser(torch.nn.Module):
                 nHeavy, nHydro, nocc, \
                 Z, maskd, atom_molid, \
                 mask, pair_molid, ni, nj, idxi, idxj, xij, rij
+    
 
 class Parser_For_Ovr(torch.nn.Module):
     """
@@ -246,6 +247,7 @@ class Parser_For_Ovr(torch.nn.Module):
                nHeavy, nHydro, nocc, \
                Z, maskd, atom_molid, \
                mask, pair_molid, ni, nj, idxi, idxj, xij, rij
+    
 
 class Pack_Parameters(torch.nn.Module):
     """

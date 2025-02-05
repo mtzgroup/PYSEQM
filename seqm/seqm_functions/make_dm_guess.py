@@ -11,7 +11,8 @@ from .diag import DEGEN_EIGENSOLVER, degen_symeig, pytorch_symeig#sym_eig_trunc,
 CHECK_DEGENERACY = False
 
 
-def diag_guess(molecule):
+def diag_guess(molecule, seqm_parameters, learned_parameters=dict(),
+               overwrite_existing_dm=False, **kwargs):
     dtype  = molecule.xij.dtype
     device = molecule.xij.device
     nH = torch.count_nonzero(molecule.species == 1)
@@ -38,7 +39,8 @@ def make_dm_guess(molecule, seqm_parameters, mix_homo_lumo=False, mix_coeff=0.4,
     device = molecule.xij.device
     
     if not torch.is_tensor(molecule.dm) or overwrite_existing_dm:
-        P = diag_guess(molecule)
+        P = diag_guess(molecule, seqm_parameters, learned_parameters=learned_parameters,
+                       overwrite_existing_dm=overwrite_existing_dm)
     else:
         P = molecule.dm
     

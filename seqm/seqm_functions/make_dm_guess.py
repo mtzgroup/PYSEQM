@@ -102,7 +102,6 @@ def make_dm_guess(molecule, seqm_parameters, mix_homo_lumo=False, mix_coeff=0.4,
             e0, v = sym_eigh(x0)
         except:
             if torch.isnan(x0).any(): print(x0)
-            #print(x0.detach().data.numpy())
             e0, v = sym_eigh(x0)
         e = torch.zeros((nmol, x.shape[-1]), dtype=dtype, device=device)
         e[...,:size] = e0

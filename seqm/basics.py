@@ -285,7 +285,7 @@ class Pack_Parameters(torch.nn.Module):
         
     def forward(self, Z, learned_params=dict()):
         """
-        combine the learned_parames with other required parameters
+        combine the learned_params with other required parameters
         """
         for p_i in self.atom_req_list:
             p_dense = torch.tensor([self.atom_dict[p_i][z] for z in Z.tolist()],

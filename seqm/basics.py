@@ -57,6 +57,9 @@ atom_parameters['AM1_PDREP'] = ['U_ss', 'U_pp', 'zeta_s', 'zeta_p','beta_s', 'be
                                 'Gaussian1_M', 'Gaussian2_M', 'Gaussian3_M','Gaussian4_M']
 pair_parameters = {'AM1':[], 'AM1_PDREP':['alpha', 'chi', 'mu', 'nu'], 'MNDO':[], 'PM3':[]}
 
+electronic_parameters = {m:['U_ss', 'U_pp', 'zeta_s', 'zeta_p',
+                            'beta_s', 'beta_p', 'g_ss', 'g_sp',
+                            'g_pp', 'g_p2', 'h_sp'] for m in parameterlist.keys()}
 
 class Parser(torch.nn.Module):
     """

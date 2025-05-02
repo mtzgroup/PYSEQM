@@ -184,15 +184,14 @@ def make_dm_guess(molecule, seqm_parameters, mix_homo_lumo=False, mix_coeff=0.4,
             if cond[i]: e[i,norb[i]:size] = 0.0
         
         if mix_homo_lumo:
-            ## TODO
-            v_lumo = v.gather(2, molecule.nocc.unsqueeze(0).unsqueeze(0).T.repeat(1,v.shape[-1],1))
-            v_homo = v.gather(2, molecule.nocc.unsqueeze(0).unsqueeze(0).T.repeat(1,v.shape[-1],1)-1)
-
+            lumo_idx = molecule.nocc.unsqueeze(0).unsqueeze(0).transpose(0,-1)
+            gather_idx = lumo_idx.repeat(1,v.shape[-1],1)
+            v_lumo = v.gather(2, gather_idx )
+            homo_idx = gather_idx - 1
+            v_homo = v.gather(2, homo_idx )
             mix_coeff = torch.tensor([mix_coeff], device=device)
-
             v_mix = (1 - mix_coeff) * v_homo + mix_coeff * v_lumo
-            v.scatter_(2, molecule.nocc.unsqueeze(0).unsqueeze(0).T.repeat(1,v.shape[-1],1)-1, v_mix)
-            ## END TODO
+            v.scatter_(2, homo_idx, v_mix)
             
         if CHECK_DEGENERACY:
             t = torch.stack(list(map(lambda a,b,n : construct_P(a, b, n), e, v, molecule.nocc)))

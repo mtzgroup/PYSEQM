@@ -105,44 +105,44 @@ def make_dm_guess(molecule, seqm_parameters, mix_homo_lumo=False, mix_coeff=0.4,
         except:
             if torch.isnan(x0).any(): print(x0)
             e0, v = sym_eigh(x0)
-        e = torch.zeros((nmol, x.shape[-1]), dtype=dtype, device=device)
-        e[...,:size] = e0
-        for i in range(nmol):
-            if cond[i]: e[i,norb[i]:size] = 0.0
-        
-        # $$$ the code below can and SHOULD be optimized. Too many reshapes
-        e = e.reshape(x_orig_shape[0:3])
         
         if mix_homo_lumo:
-            v = v.reshape(int(v.shape[0]/2), 2, v.shape[1], v.shape[2])
-            v_lumo = v[:,0].gather(2, molecule.nocc[:,0].unsqueeze(0).unsqueeze(0).T.repeat(1,v.shape[-1],1))
-            v_homo = v[:,0].gather(2, molecule.nocc[:,0].unsqueeze(0).unsqueeze(0).T.repeat(1,v.shape[-1],1)-1)
-
             mix_coeff = torch.tensor([mix_coeff], device=device)
+            vv = v.view(int(v.shape[0]/2), 2, v.shape[1], v.shape[2])
+            ## alpha channel
+            _lumo_idx = molecule.nocc[:,0].unsqueeze(0).unsqueeze(0).transpose(0, -1)
+            lumo_idx = _lumo_idx.repeat(1, vv.shape[-1], 1)
+            homo_idx = (lumo_idx - 1).clamp_min(0)
+            v_lumo = vv[:,0].gather(2, lumo_idx)
+            v_homo = vv[:,0].gather(2, homo_idx)
+            v_mix = (1 - mix_coeff) * v_homo + mix_coeff * v_lumo
+            vv[:,0].scatter_(2, homo_idx, v_mix)
+            ## beta channel
+            _lumo_idx = molecule.nocc[:,1].unsqueeze(0).unsqueeze(0).transpose(0, -1)
+            lumo_idx = _lumo_idx.repeat(1, vv.shape[-1], 1)
+            homo_idx = (lumo_idx - 1).clamp_min(0)
+            v_lumo = vv[:,1].gather(2, lumo_idx)
+            v_homo = vv[:,1].gather(2, homo_idx)
+            v_mix = (1 - mix_coeff) * v_homo + mix_coeff * v_lumo
+            vv[:,1].scatter_(2, homo_idx, v_mix)
             
-            v_a_homo = (1 - mix_coeff) * v_homo + mix_coeff * v_lumo
-            #v_a_lumo = -(mix_coeff)*v_homo + (1-mix_coeff)*v_lumo
-
-            #v_b_homo = (1-mix_coeff)*v_homo - torch.sin(mix_coeff)*v_lumo
-            #v_b_lumo =  (mix_coeff)*v_homo + (1-mix_coeff)*v_lumo
-
-            v[:,0].scatter_(2, molecule.nocc[:,0].unsqueeze(0).unsqueeze(0).T.repeat(1,v.shape[-1],1)-1, v_a_homo)
-            #v[:,0].scatter_(2, molecule.nocc[:,0].unsqueeze(0).unsqueeze(0).T.repeat(1,v.shape[-1],1), v_a_lumo)
-
-            #v[:,1].scatter_(2, molecule.nocc[:,1].unsqueeze(0).unsqueeze(0).T.repeat(1,v.shape[-1],1)-1, v_b_homo)
-            #v[:,1].scatter_(2, molecule.nocc[:,1].unsqueeze(0).unsqueeze(0).T.repeat(1,v.shape[-1],1), v_b_lumo)
-            
-            v = v.reshape(int(v.shape[0]*2),v.shape[2],v.shape[3])
+            v = vv.view(int(vv.shape[0]*2), vv.shape[2], vv.shape[3])
             
         if CHECK_DEGENERACY:
+            e = torch.zeros((nmol, x.shape[-1]), dtype=dtype, device=device)
+            e[...,:size] = e0
+            for i in range(nmol):
+                if cond[i]: e[i,norb[i]:size] = 0.0
+
+            e = e.view(x_orig_shape[0:3])
             t = torch.stack(list(map(lambda a,b,n : construct_P(a, b, n), e, v, nocc)))
         else:
             t = 2.0*torch.stack(list(map(lambda a,n : torch.matmul(a[:,:n], a[:,:n].transpose(0,1)), v, nocc)))
 
         P = unpack(t, nheavyatom, nH, x.shape[-1])
-        v = v.reshape(int(v.shape[0]/2),2,v.shape[1],v.shape[2])
-        P = P.reshape(x_orig_shape)
-        molecule.dm = P / 2
+        v = v.view(int(v.shape[0]/2), 2, v.shape[1], v.shape[2])
+        P = P.view(x_orig_shape) / 2
+        molecule.dm = P
         return P, v
     else:
         x = fock(molecule.nmol, molecule.molsize, P, M, molecule.maskd, molecule.mask, molecule.idxi,
@@ -178,22 +178,21 @@ def make_dm_guess(molecule, seqm_parameters, mix_homo_lumo=False, mix_coeff=0.4,
             else:
                 e0, v = sym_eigh(x0)
         
-        e = torch.zeros((nmol, x.shape[-1]), dtype=dtype, device=device)
-        e[...,:size] = e0
-        for i in range(nmol):
-            if cond[i]: e[i,norb[i]:size] = 0.0
-        
         if mix_homo_lumo:
             lumo_idx = molecule.nocc.unsqueeze(0).unsqueeze(0).transpose(0,-1)
             gather_idx = lumo_idx.repeat(1,v.shape[-1],1)
-            v_lumo = v.gather(2, gather_idx )
+            v_lumo = v.gather(2, gather_idx)
             homo_idx = gather_idx - 1
-            v_homo = v.gather(2, homo_idx )
+            v_homo = v.gather(2, homo_idx)
             mix_coeff = torch.tensor([mix_coeff], device=device)
             v_mix = (1 - mix_coeff) * v_homo + mix_coeff * v_lumo
             v.scatter_(2, homo_idx, v_mix)
             
         if CHECK_DEGENERACY:
+            e = torch.zeros((nmol, x.shape[-1]), dtype=dtype, device=device)
+            e[...,:size] = e0
+            for i in range(nmol):
+                if cond[i]: e[i,norb[i]:size] = 0.0
             t = torch.stack(list(map(lambda a,b,n : construct_P(a, b, n), e, v, molecule.nocc)))
         else:
             t = 2.0*torch.stack(list(map(lambda a,n : torch.matmul(a[:,:n], a[:,:n].transpose(0,1)), v, molecule.nocc)))

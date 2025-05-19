@@ -33,7 +33,7 @@ def diag_guess(molecule, seqm_parameters, learned_parameters=dict(),
 
 def make_dm_guess(molecule, seqm_parameters, mix_homo_lumo=False, mix_coeff=0.4,
                   learned_parameters=dict(), overwrite_existing_dm=False,
-                  simple_diag=False, from_hcore=True, ivans_beta=False):
+                  from_hcore=True, ivans_beta=False):
     sym_eigh = degen_symeig.apply if DEGEN_EIGENSOLVER else pytorch_symeig
     dtype  = molecule.xij.dtype
     device = molecule.xij.device
@@ -44,7 +44,7 @@ def make_dm_guess(molecule, seqm_parameters, mix_homo_lumo=False, mix_coeff=0.4,
     else:
         P = molecule.dm
     
-    if simple_diag:
+    if not from_hcore:
         molecule.dm = P
         return P, None
     
@@ -62,27 +62,6 @@ def make_dm_guess(molecule, seqm_parameters, mix_homo_lumo=False, mix_coeff=0.4,
     zetap = parameters['zeta_p']
     uss = parameters['U_ss']
     upp = parameters['U_pp']
-    if not from_hcore:
-        Iss = -uss.sgn() * uss.abs().sqrt()
-        Ipp = torch.where(molecule.Z>1, -upp.sgn() * upp.abs().sqrt(), 0)
-        Idiag = torch.cat( (Iss.unsqueeze(0), Ipp.repeat(3,1)) ).T.reshape(-1)
-        tore = molecule.const.tore
-        ntot_orb = 4 * molecule.nmol * molecule.molsize
-        full_index = torch.arange(ntot_orb, device=device)
-        real_orb = (molecule.species.reshape(-1) > 0).repeat_interleave(4,0)
-        orb_map = full_index[real_orb]
-        I_mapped = torch.zeros(ntot_orb, dtype=dtype, device=device)
-        I_mapped[orb_map] = Idiag
-        I_mol = I_mapped.view(molecule.nmol, -1)
-        I_rel = I_mol / I_mol.sum(dim=-1).unsqueeze(-1)
-        n_el  = torch.sum(tore[molecule.species], dim=1).reshape(-1)
-        n_el -= molecule.tot_charge.reshape(-1)
-        diag_mol = I_rel * n_el.unsqueeze(-1)
-        if molecule.nocc.dim() == 2:
-            diag_mol = (0.5 * diag_mol).unsqueeze(1).repeat(1,2,1)
-        P = torch.diag_embed(diag_mol)
-        return P, None
-    
     gss = parameters['g_ss']
     gsp = parameters['g_sp']
     gpp = parameters['g_pp']

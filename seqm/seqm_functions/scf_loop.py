@@ -41,7 +41,7 @@ SCF_BACKWARD_ANDERSON_HISTSIZE = 5      # seems reasonable, but TODO!
 # constant mixing
 def scf_forward0(M, w, gss, gpp, gsp, gp2, hsp, nHydro, nHeavy, nOccMO,
                  nmol, molsize, maskd, mask, idxi, idxj, P, eps,
-                 sp2=[False], alpha=0.0, backward=False, max_iter=MAX_ITER):
+                 sp2=[False], alpha=0.0, backward=False):
     """
     alpha : mixing parameters, alpha=0.0, directly take the new density matrix
     backward is for testing purpose, default is False
@@ -56,7 +56,7 @@ def scf_forward0(M, w, gss, gpp, gsp, gp2, hsp, nHydro, nHeavy, nOccMO,
              .reshape(nmol, 4*molsize, 4*molsize)
     Eelec = elec_energy(P, F, Hcore)
     Eelec_new = torch.zeros_like(Eelec)
-    for k in range(max_iter + 1):
+    for k in range(MAX_ITER+1):
         start_time = time.time()
         if backward:
             e, Pnew[notconverged], v = sym_eig_trunc1(F[notconverged],
@@ -94,7 +94,7 @@ def scf_forward0(M, w, gss, gpp, gsp, gp2, hsp, nHydro, nHeavy, nOccMO,
 #use constant mixing, open shell
 def scf_forward0_u(M, w, gss, gpp, gsp, gp2, hsp, nHydro, nHeavy, nOccMO,
                    nmol, molsize, maskd, mask, idxi, idxj, P, eps=1.0e-5,
-                   sp2=[False], alpha=0.0, backward=False, max_iter=MAX_ITER):
+                   sp2=[False], alpha=0.0, backward=False):
     """
     alpha : mixing parameters, alpha=0.0, directly take the new density matrix
     backward is for testing purpose, default is False
@@ -110,7 +110,7 @@ def scf_forward0_u(M, w, gss, gpp, gsp, gp2, hsp, nHydro, nHeavy, nOccMO,
              .reshape(nmol, 4*molsize, 4*molsize)
     Eelec = elec_energy(P, F, Hcore)
     Eelec_new = torch.zeros_like(Eelec)
-    for k in range(max_iter + 1):
+    for k in range(MAX_ITER+1):
         start_time = time.time()
         if backward:
             e, P_ab[notconverged], v = sym_eig_trunc1(F[notconverged],
@@ -295,15 +295,14 @@ def scf_forward1(M, w, gss, gpp, gsp, gp2, hsp, nHydro, nHeavy, nOccMO,
             Nnot = torch.sum(notconverged).item()
             if debug: print("scf ", k, max_err, Nnot)
             k = k + 1
-            if k >= max_iter: return P, notconverged
+            if k >= MAX_ITER: return P, notconverged
         else:
             return P, notconverged
 
 
 #adaptive mixing, pulay
 def scf_forward2(M, w, gss, gpp, gsp, gp2, hsp, nHydro, nHeavy, nOccMO,
-                 nmol, molsize, maskd, mask, idxi, idxj, P, eps, sp2=[False],
-                 max_iter=MAX_ITER):
+                 nmol, molsize, maskd, mask, idxi, idxj, P, eps, sp2=[False]):
     """
     adaptive mixing algorithm, see cnvg.f
     combine with pulay converger
@@ -505,14 +504,14 @@ def scf_forward2(M, w, gss, gpp, gsp, gp2, hsp, nHydro, nHeavy, nOccMO,
             Nnot = torch.sum(notconverged).item()
             if debug: print("scf ", k, max_err, Nnot)
             k = k + 1
-            if k >= max_iter: return P, notconverged
+            if k >= MAX_ITER: return P, notconverged
         else:
             return P, notconverged
 
         
 def scf_forward3(M, w, gss, gpp, gsp, gp2, hsp, nHydro, nHeavy, nOccMO, 
                  nmol, molsize, maskd, mask, idxi, idxj, P, eps, 
-                 xl_bomd_params, backward=False, max_iter=MAX_ITER):
+                 xl_bomd_params, backward=False):
     """
     DM scf optimization using KSA
     $$$ probably, not properly optimized for batches. 
@@ -600,7 +599,7 @@ def scf_forward3(M, w, gss, gpp, gsp, gp2, hsp, nHydro, nHeavy, nOccMO,
             if debug:
                 end_time = time.time()
                 print(COUNTER, SCF_err.cpu().numpy(), err.cpu().numpy(), torch.sum(notconverged).item(), end_time - start_time)
-            if COUNTER >= max_iter: return P, notconverged
+            if COUNTER >= MAX_ITER: return P, notconverged
         else:
             return P, notconverged
         
@@ -685,23 +684,22 @@ class SCF(torch.autograd.Function):
     def forward(ctx, M, w, gss, gpp, gsp, gp2, hsp,
                 nHydro, nHeavy, nOccMO, nmol, molsize,
                 maskd, mask, atom_molid, pair_molid, idxi, idxj, P, eps,
-                scf_converger, use_sp2, scf_backward_eps, max_iter):
+                scf_converger, use_sp2, scf_backward_eps):
         if scf_converger[0] == 0:
             if P.dim() == 4:
                 P, notconverged = scf_forward0_u(M, w, gss, gpp, gsp, gp2, hsp,
                                    nHydro, nHeavy, nOccMO, nmol, molsize,
                                    maskd, mask, idxi, idxj, P, eps, sp2=use_sp2,
-                                   alpha=scf_converger[1], max_iter=max_iter)
+                                   alpha=scf_converger[1])
             else:
                 P, notconverged = scf_forward0(M, w, gss, gpp, gsp, gp2, hsp,
                                    nHydro, nHeavy, nOccMO, nmol, molsize,
                                    maskd, mask, idxi, idxj, P, eps, sp2=use_sp2,
-                                   alpha=scf_converger[1], max_iter=max_iter)
+                                   alpha=scf_converger[1])
         elif scf_converger[0] == 3: # KSA
             P, notconverged = scf_forward3(M, w, gss, gpp, gsp, gp2, hsp,
                                    nHydro, nHeavy, nOccMO, nmol, molsize,
-                                   maskd, mask, idxi, idxj, P, eps, scf_converger[1],
-                                   max_iter=max_iter)
+                                   maskd, mask, idxi, idxj, P, eps, scf_converger[1])
         else:
             if scf_converger[0] == 1: # adaptive mixing
                 scf_forward = scf_forward1
@@ -709,8 +707,7 @@ class SCF(torch.autograd.Function):
                 scf_forward = scf_forward2
             P, notconverged = scf_forward(M, w, gss, gpp, gsp, gp2, hsp, \
                                nHydro, nHeavy, nOccMO, nmol, molsize, \
-                               maskd, mask, idxi, idxj, P, eps, sp2=use_sp2,
-                               max_iter=max_iter)
+                               maskd, mask, idxi, idxj, P, eps, sp2=use_sp2)
         
         eps = torch.as_tensor(eps, dtype=M.dtype, device=M.device)
         scf_backward_eps = torch.as_tensor(scf_backward_eps, dtype=M.dtype, device=M.device)
@@ -824,7 +821,7 @@ class SCF(torch.autograd.Function):
                None, None, None, \
                None, None, \
                None, None, None, None, None, None, None, None, \
-               None, None, None, None
+               None, None, None
         
     
 
@@ -836,14 +833,14 @@ class SCF0(SCF):
                None, None, None, \
                None, None, \
                None, None, None, None, None, None, None, None, \
-               None, None, None, None
+               None, None, None
 
 
 def scf_loop(const, molsize, nHeavy, nHydro, nOccMO, \
             maskd, mask, atom_molid, pair_molid, idxi, idxj, ni, nj, xij, rij, Z, \
             zetas, zetap, uss, upp , gss, gsp, gpp, gp2, hsp, beta, Kbeta=None, \
             eps=1e-4, P=None, sp2=[False], scf_converger=[0,0.15], eig=False, scf_backward=0, \
-            scf_backward_eps=1e-2, ivans_beta=False, max_iter=MAX_ITER):
+            scf_backward_eps=1e-2, ivans_beta=False):
     """
     SCF loop
     # check hcore.py for the details of arguments
@@ -893,16 +890,16 @@ def scf_loop(const, molsize, nHeavy, nHydro, nOccMO, \
                 Pconv, notconverged = scf_forward0_u(M, w, gss, gpp, gsp, gp2, hsp,
                                 nHydro, nHeavy, nOccMO, nmol, molsize,
                                 maskd, mask, idxi, idxj, P, eps, sp2=sp2, 
-                                alpha=scf_converger[1], backward=True, max_iter=max_iter)
+                                alpha=scf_converger[1], backward=True)
             else:
                 Pconv, notconverged = scf_forward0(M, w, gss, gpp, gsp, gp2, hsp,
                                 nHydro, nHeavy, nOccMO, nmol, molsize, maskd, mask, 
                                 idxi, idxj, P, eps, sp2=sp2, alpha=scf_converger[1],
-                                backward=True, max_iter=max_iter)
+                                backward=True)
         elif scf_converger[0] == 1:
             Pconv, notconverged = scf_forward1(M, w, gss, gpp, gsp, gp2, hsp,
                                 nHydro, nHeavy, nOccMO, nmol, molsize, maskd, mask, 
-                                idxi, idxj, P, eps, sp2=sp2, backward=True, max_iter=max_iter)
+                                idxi, idxj, P, eps, sp2=sp2, backward=True)
         else:
             raise ValueError("""For direct backpropagation through scf,
                                 must use constant mixing at this moment\n
@@ -919,10 +916,10 @@ def scf_loop(const, molsize, nHeavy, nHydro, nOccMO, \
         Pconv, notconverged = scfapply(M, w, gss, gpp, gsp, gp2, hsp,
                         nHydro, nHeavy, nOccMO, nmol, molsize, maskd, mask,
                         atom_molid, pair_molid, idxi, idxj, P, eps,
-                        scf_converger, sp2, scf_backward_eps, max_iter)
+                        scf_converger, sp2, scf_backward_eps)
     if notconverged.any():
         nnot = notconverged.type(torch.int).sum().data.item()
-        warnings.warn("SCF for %d/%d molecules doesn't converge after %d iterations" % (nnot, nmol, max_iter))
+        warnings.warn("SCF for %d/%d molecules doesn't converge after %d iterations" % (nnot, nmol, MAX_ITER))
         if RAISE_ERROR_IF_SCF_FORWARD_FAILS:
             raise ValueError("SCF for some the molecules in the batch doesn't converge")
 

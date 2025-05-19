@@ -1,5 +1,5 @@
 import torch
-from .seqm_functions.scf_loop import scf_loop, MAX_ITER
+from .seqm_functions.scf_loop import scf_loop
 from .seqm_functions.energy import *
 from .seqm_functions.parameters import atom_params, pair_params
 from torch.autograd import grad
@@ -322,7 +322,6 @@ class Hamiltonian(torch.nn.Module):
         # 0: ignore gradient on density matrix from Hellmann Feymann Theorem,
         # 1: use recursive formula go back through scf loop
         # 2: direct backprop through SCF cycle
-        self.scf_maxiter = seqm_parameters.get('scf_maxiter', MAX_ITER)
         self.ivans_beta = seqm_parameters.get('ivans_beta', False)
     
     def forward(self, const, molsize, nHeavy, nHydro, nocc, Z, maskd, mask, atom_molid, pair_molid, idxi, idxj, ni,nj,xij,rij, parameters, P0=None):
@@ -387,8 +386,7 @@ class Hamiltonian(torch.nn.Module):
                               eig=self.eig,
                               scf_backward=self.scf_backward,
                               scf_backward_eps=self.scf_backward_eps,
-                              ivans_beta=self.ivans_beta,
-                              max_iter=self.scf_maxiter)
+                              ivans_beta=self.ivans_beta)
         #
         return F, e, C, P, Hcore, w, charge, notconverged
     

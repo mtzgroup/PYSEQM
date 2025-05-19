@@ -408,7 +408,6 @@ class Energy(torch.nn.Module):
         self.Hf_flag = seqm_parameters.get('Hf_flag', True)
         self.uhf = seqm_parameters.get('UHF', False)
         self.eig = seqm_parameters.get('eig', False)
-        self.seqm_parameters = seqm_parameters
 
     def forward(self, molecule, learned_parameters=dict(), all_terms=False, P0=None, *args, **kwargs):
         """
@@ -422,28 +421,6 @@ class Energy(torch.nn.Module):
             parameters = self.packpar(Z, learned_params=adict)
         else:
             parameters = self.packpar(Z, learned_params=learned_parameters)
-        
-        if P0 is None:
-            uss, upp = parameters['U_ss'], parameters['U_pp']
-            Iss = -uss.sgn() * uss.abs().sqrt()
-            Ipp = torch.where(molecule.Z>1, -upp.sgn() * upp.abs().sqrt(), 0)
-            Idiag = torch.cat( (Iss.unsqueeze(0), Ipp.repeat(3,1)) ).T.reshape(-1)
-            tore = molecule.const.tore
-            ntot_orb = 4 * molecule.nmol * molecule.molsize
-            full_index = torch.arange(ntot_orb, device=xij.device)
-            real_orb = (molecule.species.reshape(-1) > 0).repeat_interleave(4,0)
-            orb_map = full_index[real_orb]
-            I_mapped = torch.zeros(ntot_orb, dtype=xij.dtype, device=xij.device)
-            I_mapped[orb_map] = Idiag
-            I_mol = I_mapped.view(molecule.nmol, -1)
-            I_rel = I_mol / I_mol.sum(dim=-1).unsqueeze(-1)
-            n_el  = torch.sum(tore[molecule.species], dim=1).reshape(-1)
-            n_el -= molecule.tot_charge.reshape(-1)
-            diag_mol = I_rel * n_el.unsqueeze(-1)
-            if molecule.nocc.dim() == 2:
-                diag_mol = (0.5 * diag_mol).unsqueeze(1).repeat(1,2,1)
-            P0 = torch.diag_embed(diag_mol)
-
         F, e, C, P, Hcore, w, charge, notconverged = self.hamiltonian(molecule.const, molsize,
                                                  nHeavy, nHydro, nocc, Z, maskd, mask, atom_molid,
                                                  pair_molid, idxi, idxj, ni,nj,xij,rij,

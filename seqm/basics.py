@@ -523,7 +523,9 @@ class Force(torch.nn.Module):
     def __init__(self, seqm_parameters):
         super(Force, self).__init__()
         self.energy = Energy(seqm_parameters)
-        self.create_graph = seqm_parameters.get('2nd_grad', False)
+        do_hessian = seqm_parameters.get('hessian', False)
+        graph_req = seqm_parameters.get('2nd_grad', False)
+        self.create_graph = do_hessian or graph_req
         self.uhf = seqm_parameters.get('UHF', False)
         self.eig = seqm_parameters.get('eig', False)
         self.seqm_parameters = seqm_parameters
@@ -545,17 +547,17 @@ class Force(torch.nn.Module):
         ## Why not grad(L, gv, ...)?
         #gv = [coordinates]
         #gradients  = grad(L, gv,create_graph=self.create_graph)
-        L.backward(create_graph=self.create_graph)
+        if self.create_graph:
+            force = -grad(Etot.sum(), molecule.coordinates, create_graph=True)[0]
+        else:
+            L.backward()
+            force = -molecule.coordinates.grad.detach()
+            molecule.coordinates.grad.zero_()
+        
         if molecule.const.do_timing:
             if torch.cuda.is_available(): torch.cuda.synchronize()
             t1 = time.time()
             molecule.const.timing["Force"].append(t1-t0)
-        if self.create_graph:
-            force = -molecule.coordinates.grad.clone()
-            with torch.no_grad(): molecule.coordinates.grad.zero_()
-        else:
-            force = -molecule.coordinates.grad.detach()
-            molecule.coordinates.grad.zero_()
         
         # why detach? no external grads?
-        return force.detach(), D.detach(), Hf.detach(), Etot.detach(), Eelec.detach(), Enuc.detach(), Eiso.detach(), e, e_gap, C, charge, notconverged
+        return force, D.detach(), Hf.detach(), Etot.detach(), Eelec.detach(), Enuc.detach(), Eiso.detach(), e, e_gap, C, charge, notconverged

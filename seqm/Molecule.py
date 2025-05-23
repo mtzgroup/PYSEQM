@@ -7,7 +7,8 @@ from .basics import Parser
 
 mol_attributes = ["force", "velocities", "acc", "dm", "q", "d", "Hf", "Etot", "Eelec",
                   "Enuc", "Eiso", "e_mo", "e_gap", "mo_coeff", "charge", "dipole",
-                  "Electronic_entropy", "Fermi_occ", "dP2dt2", "Krylov_Error"]
+                  "Electronic_entropy", "Fermi_occ", "dP2dt2", "Krylov_Error",
+                  "hessian", "vib_freqs", "vib_modes"]
 
 class Molecule(torch.nn.Module,Sequence):
     def __init__(self, const, seqm_parameters, coordinates, species, charges=0, mult=1, *args, **kwargs):

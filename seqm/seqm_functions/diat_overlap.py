@@ -21,8 +21,9 @@ def diatom_overlap_matrix(ni,nj, xij, rij, zeta_a, zeta_b, qn_int):
     # 0,1,2,3: sigma, px, py, pz
 
 
-    xy = torch.norm(xij[...,:2],dim=1)
-
+#    xy = torch.norm(xij[...,:2],dim=1) #MS2025/05/23: norm causes issues with double backward for diatomics
+    xy = xij[...,:2].square().sum(dim=1)
+    
     #``self.where(condition, y)`` is equivalent to ``torch.where(condition, self, y)``.
 
     tmp = torch.where(xij[...,2]<0.0,torch.tensor(-1.0,dtype=dtype, device=device), \
@@ -30,19 +31,28 @@ def diatom_overlap_matrix(ni,nj, xij, rij, zeta_a, zeta_b, qn_int):
           torch.tensor(0.0,dtype=dtype, device=device)))
 
     #ca = torch.where(xy>=1.0e-10, xij[...,0]/xy, tmp)
-    cond_xy = xy>=1.0e-10
+#    cond_xy = xy>=1.0e-10 #MS2025/05/23: norm above causes issues with double backward for diatomics
+    cond_xy = xy >= 1e18
     ca = tmp.clone()
-    ca[cond_xy] = xij[cond_xy,0]/xy[cond_xy]
+#    ca[cond_xy] = xij[cond_xy,0]/xy[cond_xy]
+    ca[cond_xy] = xij[cond_xy,0] / xy[cond_xy].sqrt()
 
-    cb = torch.where(xy>=1.0e-10, xij[...,2], tmp)  #xij is a unti vector already
+#    cb = torch.where(xy>=1.0e-10, xij[...,2], tmp)  #xij is a unti vector already
+    #MS2025/05/23: norm above causes issues with double backward for diatomics
+    cb = torch.where(xy>=1.0e-18, xij[...,2], tmp)  #xij is a unti vector already
     #cb = torch.where(xy>=1.0e-10, xij[...,2]/rij, tmp)
     #del tmp
     #sa = torch.where(xy>=1.0e-10, xij[...,1]/xy, torch.tensor(0.0,dtype=dtype, device=device))
     sa = torch.zeros_like(xy)
 
-    sa[cond_xy] = xij[cond_xy,1]/xy[cond_xy]
+    #MS2025/05/23: norm above causes issues with double backward for diatomics
+#    sa[cond_xy] = xij[cond_xy,1]/xy[cond_xy]
+    sa[cond_xy] = xij[cond_xy,1] / xy[cond_xy].sqrt()
     #sb = torch.where(xy>=1.0e-10, xy/rij, torch.tensor(0.0,dtype=dtype))
-    sb = torch.where(xy>=1.0e-10, xy, torch.tensor(0.0,dtype=dtype, device=device))
+    #MS2025/05/23: norm above causes issues with double backward for diatomics
+#    sb = torch.where(xy>=1.0e-10, xy, torch.tensor(0.0,dtype=dtype, device=device))
+    sb = torch.zeros_like(xy)
+    sb[cond_xy] = xy[cond_xy].sqrt()
     ################################
     #ok to use torch.where here as postion doesn't require grad
     #if update to do MD, ca, cb, sa, sb should be chaneged to the indexing version

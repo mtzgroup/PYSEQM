@@ -1,6 +1,6 @@
 import torch
 
-def diatom_overlap_matrix(ni,nj, xij, rij, zeta_a, zeta_b, qn_int):
+def diatom_overlap_matrix(ni, nj, xij, rij, zeta_a, zeta_b, qn_int):
     """
     compute the overlap matrix for each pair
     """
@@ -19,7 +19,6 @@ def diatom_overlap_matrix(ni,nj, xij, rij, zeta_a, zeta_b, qn_int):
     # zeta_a, zeta_b: zeta_s and zeta_p for atom pair a-b, shape(npairs, 2)
     # output di: overlap matrix between AOs from atom i an j, shape (npairs, 4,4)
     # 0,1,2,3: sigma, px, py, pz
-
 
     xy = xij[...,:2].square().sum(dim=1)
     sgn_zij = xij[...,2].sgn()
@@ -148,7 +147,7 @@ def diatom_overlap_matrix(ni,nj, xij, rij, zeta_a, zeta_b, qn_int):
     #form di
     #check di_index.txt
 
-    di=torch.zeros((npairs,4,4),dtype=dtype, device=device)
+    di = torch.zeros((npairs,4,4), dtype=dtype, device=device)
 
     # diat coe
     # c : computed in coe, with shape (75)

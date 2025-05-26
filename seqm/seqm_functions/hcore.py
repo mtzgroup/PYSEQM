@@ -39,8 +39,8 @@ class MatrixSquareRoot(torch.autograd.Function):
 sqrtm = MatrixSquareRoot.apply
 
 
-def hcore(const,nmol,molsize, maskd, mask, idxi,idxj, ni,nj,xij,rij,
-          Z, zetas,zetap, uss,upp,gss,gpp,gp2,hsp,beta, 
+def hcore(const, nmol, molsize, maskd, mask, idxi, idxj, ni, nj, xij, rij,
+          Z, zetas,zetap, uss, upp, gss, gpp, gp2, hsp, beta, 
           nHeavy, nHydro, nOccMO, Kbeta=None, ivans_beta=False):
     """
     Get Hcore and two electron and two center integrals
@@ -92,6 +92,7 @@ def hcore(const,nmol,molsize, maskd, mask, idxi,idxj, ni,nj,xij,rij,
     #use uss upp to the diagonal block for hcore
     zeta = torch.cat((zetas.unsqueeze(1), zetap.unsqueeze(1)), dim=1)
     overlap_pairs = rij<=overlap_cutoff
+
     #di=th.zeros((npairs,4,4),dtype=dtype, device=device)
     di = torch.zeros((xij.shape[0], 4, 4), dtype=dtype, device=device)
     #di_my = torch.zeros((nmol*molsize*molsize, 4, 4),dtype=dtype, device=device)

@@ -20,11 +20,11 @@ def vibrational_basis(masses, coordinates):
     # get Eckart frame
     X, R_Eck = eckart(masses, coordinates)
     # Eigenbasis for translations and rotations
-    T = torch.eye(3).repeat(*coordinates.shape[:2], 1)
+    T1 = torch.eye(3, device=coordinates.device, dtype=coordinates.dtype)
     G_Eck = R_Eck * masses.sqrt()
     R = torch.stack([torch.cat([torch.stack([gij.cross(xi[i]) for i in range(3)])
                      for gij in gi]) for (gi, xi) in zip(G_Eck, X)])
-    TR = torch.cat((T, R), 2)
+    TR = torch.cat((T1.repeat(*coordinates.shape[:2], 1), R), 2)
     # Eigenspace of global TR = net translations and rotations
     # -> remove subspace corresponding to the 6 (5) non-zero
     #    singular values for non-linear (linear) molecules

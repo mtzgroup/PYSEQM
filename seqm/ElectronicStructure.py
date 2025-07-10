@@ -62,10 +62,10 @@ class Electronic_Structure(torch.nn.Module):
                                                 for ev in e_vecs]) for i, g in enumerate(g_flat)]
                                               ).view(molecule.nmol, _3n, _3n)
                 
-                if not self.keep_graph: molecule.force.detach_()
                 curve, molecule.vib_modes = harmonic_analysis(molecule.mass, molecule.coordinates,
                                                               molecule.hessian)
                 molecule.vib_freqs = nestedmap_unary(curve2freq, curve)
+            if not self.keep_graph: molecule.force.detach_()
             molecule.dm = P.detach()
             molecule.mo_coeff = C#.detach() # detach needed?
             

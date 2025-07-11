@@ -68,7 +68,7 @@ class Parser(torch.nn.Module):
         n_charge = torch.sum(tore[species],dim=1).reshape(-1).type(torch.int64)
         if 'charges' in kwargs and torch.is_tensor(kwargs['charges']):
             n_charge -= kwargs['charges'].reshape(-1).type(torch.int64)
-        nocc = n_charge//2
+        nocc = torch.div(n_charge, 2, rounding_mode='floor')
 
         if ((n_charge%2)==1).any():
             raise ValueError("Only closed shell system (with even number of electrons) are supported")
@@ -89,7 +89,10 @@ class Parser(torch.nn.Module):
                                 .reshape(-1)
         #
         paircoord_raw = (coordinates.unsqueeze(1)-coordinates.unsqueeze(2)).reshape(-1,3)
-        pairdist_raw = torch.norm(paircoord_raw,dim=1)
+        pairdist2_tmp = (paircoord_raw**2).sum(dim=1)
+        pairdist2 = torch.where(pairdist2_tmp==0.0, 1.0e-4, pairdist2_tmp)
+        pairdist_raw = torch.sqrt(pairdist2)
+        # pairdist_raw = torch.norm(paircoord_raw,dim=1)
         close_pairs = pairdist_raw < self.outercutoff
 
         pairs = (pair_first<pair_second) * nonblank_pairs * close_pairs

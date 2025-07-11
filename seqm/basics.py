@@ -70,7 +70,7 @@ class Parser(torch.nn.Module):
         Constructor
         """
         super(Parser, self).__init__()
-        self.outercutoff = seqm_parameters['pair_outer_cutoff']
+        self.outercutoff2 = seqm_parameters.get('pair_outer_cutoff', 1e10)**2
         self.elements = seqm_parameters['elements']
         self.uhf = seqm_parameters.get('UHF', False)
 
@@ -133,7 +133,7 @@ class Parser(torch.nn.Module):
         #
         paircoord_raw = (molecule.coordinates.unsqueeze(1)-molecule.coordinates.unsqueeze(2)).reshape(-1,3)
         pairdist_sq = torch.square(paircoord_raw).sum(dim=1)
-        close_pairs = pairdist_sq < self.outercutoff**2
+        close_pairs = pairdist_sq < self.outercutoff2
 
         pairs = (pair_first<pair_second) * nonblank_pairs * close_pairs
 
@@ -174,7 +174,7 @@ class Parser_For_Ovr(torch.nn.Module):
         Constructor
         """
         super(Parser_For_Ovr, self).__init__()
-        self.outercutoff = seqm_parameters['pair_outer_cutoff']
+        self.outercutoff2 = seqm_parameters.get('pair_outer_cutoff', 1e10)**2
         self.elements = seqm_parameters['elements']
 
     def forward(self, constants, species, coordinates, *args, **kwargs):
@@ -227,7 +227,7 @@ class Parser_For_Ovr(torch.nn.Module):
         #
         paircoord_raw = (coordinates.unsqueeze(1) - coordinates.unsqueeze(2)).reshape(-1,3)
         pairdist_sq = torch.square(paircoord_raw).sum(dim=1)
-        close_pairs = pairdist_sq < self.outercutoff**2
+        close_pairs = pairdist_sq < self.outercutoff2
 
         pairs = (pair_first<=pair_second) * nonblank_pairs * close_pairs
 

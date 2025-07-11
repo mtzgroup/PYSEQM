@@ -14,24 +14,18 @@ This is a locally-modified development version of [PYSEQM](https://github.com/la
 * Efficient expansion algorithm [SP2](https://journals.aps.org/prb/abstract/10.1103/PhysRevB.66.155115) for generating density matrix
 * THIS VERSION: general, differentiable eigensolver for degenerate molecular orbitals
 * THIS VERSION: much-improved implicit AutoDiff-based SCFbackward
-* THIS VERSION: easy-to-use interface for parameter optimization (alpha)
-* THIS VERSION: kernel-predicted SEQC parameters incl. training routines (alpha)
+* THIS VERSION: additional minor fixes for efficiency and differentiability
+* THIS VERSION: AutoDiff-based harmonic vibrational analysis
 
-* **TODO**:
-  - implement second derivatives of SCF solver (vanishing in second derivatives of energy)
-  - fix second energy derivative for zeta_s parameter (d^2E/dzeta_s^2)
 
 ## Installation:
 
 ```bash
-git clone https://github.com/lanl/PYSEQM.git
+git clone -b develop https://github.com/mtzgroup/PYSEQM.git
 cd PYSEQM
-python setup.py install
+pip install .
 ```
-or
-```bash
-pip install git+https://github.com/lanl/PYSEQM.git
-```
+(for now, develop branch recommended)
 
 To enable GPU with CUDA, please refer to the Installation Guide on [PyTorch website](https://pytorch.org/)
 

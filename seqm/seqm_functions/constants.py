@@ -149,3 +149,4 @@ class Constants(torch.nn.Module):
                self.qn, \
                self.qn_int
         """
+    

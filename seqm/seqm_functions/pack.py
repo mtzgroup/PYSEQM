@@ -6,7 +6,7 @@ import torch
 
 def packone(x, nho, nHydro, norb):
     x0 = torch.zeros((norb,norb), dtype=x.dtype, device=x.device)
-    x0[:nho,:nho]=x[:nho,:nho]
+    x0[:nho,:nho] = x[:nho,:nho]
     x0[:nho, nho:(nho+nHydro)] = x[:nho,nho:(nho+4*nHydro):4]
     x0[nho:(nho+nHydro),nho:(nho+nHydro)] = x[nho:(nho+4*nHydro):4,nho:(nho+4*nHydro):4]
     x0[nho:(nho+nHydro), :nho] = x[nho:(nho+4*nHydro):4, :nho]
@@ -22,13 +22,9 @@ def unpackone(x0, nho, nHydro, size):
 
 def pack(x, nHeavy, nHydro):
     nho = 4*nHeavy
-    #print('Pack ', x.dim())
-    #print(x)
     if x.dim()==2:
-        #print('pack 2')
         x0 = packone(x, nHeavy*4, nHydro, nho+nHydro)
     elif x.dim()==4:
-        #print('pack 4')
         norb = torch.max(nho+nHydro)
         x = x.flatten(start_dim=0, end_dim=1)
         x0 = torch.stack(list(map(lambda a, b, c : packone(a, b, c, norb), x, nho, nHydro)))

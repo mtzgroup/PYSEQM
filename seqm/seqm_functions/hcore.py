@@ -2,9 +2,46 @@ import torch
 from .diat_overlap import diatom_overlap_matrix
 from .two_elec_two_center_int import two_elec_two_center_int as TETCI
 from .constants import overlap_cutoff
+from .pack import pack, unpack
+import scipy.linalg
 
-def hcore(const,nmol,molsize, maskd, mask, idxi,idxj, ni,nj,xij,rij,
-            Z, zetas,zetap, uss,upp,gss,gpp,gp2,hsp,beta, Kbeta=None):
+
+class MatrixSquareRoot(torch.autograd.Function):
+    """Square root of a positive definite matrix.
+
+    NOTE: matrix square root is not differentiable for matrices with
+          zero eigenvalues.
+    """
+    @staticmethod
+    def forward(ctx, input):
+        M = input.detach().cpu().numpy()
+        Msqrt = torch.from_numpy(scipy.linalg.sqrtm(M).real).to(input)
+        ctx.save_for_backward(Msqrt)
+        return Msqrt
+
+    @staticmethod
+    def backward(ctx, grad_output):
+        grad_input = None
+        if ctx.needs_input_grad[0]:
+            Msqrt, = ctx.saved_tensors
+            Msqrt = Msqrt.data.cpu().numpy()
+            gm = grad_output.data.cpu().numpy()
+
+            # Given a positive semi-definite matrix X,
+            # since X = X^{1/2}X^{1/2}, we can compute the gradient of the
+            # matrix square root dX^{1/2} by solving the Sylvester equation:
+            # dX = (d(X^{1/2})X^{1/2} + X^{1/2}(dX^{1/2}).
+            grad_Msqrt = scipy.linalg.solve_sylvester(Msqrt, Msqrt, gm)
+
+            grad_input = torch.from_numpy(grad_Msqrt).to(grad_output)
+        return grad_input
+
+sqrtm = MatrixSquareRoot.apply
+
+
+def hcore(const, nmol, molsize, maskd, mask, idxi, idxj, ni, nj, xij, rij,
+          Z, zetas,zetap, uss, upp, gss, gpp, gp2, hsp, beta, 
+          nHeavy, nHydro, nOccMO, Kbeta=None, ivans_beta=False):
     """
     Get Hcore and two electron and two center integrals
     """
@@ -53,11 +90,12 @@ def hcore(const,nmol,molsize, maskd, mask, idxi,idxj, ni,nj,xij,rij,
     #h1elec(idxi, idxj, ni, nj, xij, rij, zeta_a, zeta_b, beta, ispair=False) =>  beta_mu_nu
 
     #use uss upp to the diagonal block for hcore
-    zeta = torch.cat((zetas.unsqueeze(1), zetap.unsqueeze(1)),dim=1)
+    zeta = torch.cat((zetas.unsqueeze(1), zetap.unsqueeze(1)), dim=1)
     overlap_pairs = rij<=overlap_cutoff
+
     #di=th.zeros((npairs,4,4),dtype=dtype, device=device)
-    di = torch.zeros((xij.shape[0], 4, 4),dtype=dtype, device=device)
-    di_my = torch.zeros((nmol*molsize*molsize, 4, 4),dtype=dtype, device=device)
+    di = torch.zeros((xij.shape[0], 4, 4), dtype=dtype, device=device)
+    #di_my = torch.zeros((nmol*molsize*molsize, 4, 4),dtype=dtype, device=device)
     di[overlap_pairs] = diatom_overlap_matrix(ni[overlap_pairs],
                                nj[overlap_pairs],
                                xij[overlap_pairs],
@@ -67,12 +105,12 @@ def hcore(const,nmol,molsize, maskd, mask, idxi,idxj, ni,nj,xij,rij,
                                qn_int)
 
     w, e1b, e2a = TETCI(const, idxi, idxj, ni, nj, xij, rij, Z, zetas, zetap, gss, gpp, gp2, hsp)
-    #w shape (napirs, 10,10)
+    #w shape (npairs, 10,10)
     #e1b, e2a shape (npairs, 10)
     #di shape (npairs,4,4), unit eV, core part for AO on different centers(atoms)
 
-    ntotatoms = nmol * molsize
-    M = torch.zeros(nmol*molsize*molsize,4,4,dtype=dtype,device=device)
+    nOrbstot = nmol * molsize * molsize
+    M = torch.zeros(nOrbstot, 4, 4, dtype=dtype, device=device)
 
     #fill the upper triangle part
     #unlike the mopac, which fills the lower triangle part
@@ -137,13 +175,42 @@ def hcore(const,nmol,molsize, maskd, mask, idxi,idxj, ni,nj,xij,rij,
     #off diagonal block for Hcore
     #M[mask,:,:] = smat
     #check the comment out part in diat.py h1elec
-    if torch.is_tensor(Kbeta):
+    if ivans_beta:
+        ## Resonance integrals given by S^(1/2) diag(beta) S^(1/2)
+        S = torch.zeros((nOrbstot, 4, 4), dtype=dtype, device=device)
+        S[mask] = di
+        ## reshape S into (nmols, nOrbs, nOrbs), symmetrize, add diagonal
+        S = S.view(nmol, molsize, molsize, 4, 4).transpose(2,3).flatten(1,2).flatten(2,3)
+        ## pack S (ie remove zeros for hydrogen p-orbitals)
+        S_p = pack(S, nHeavy, nHydro)
+        S_p.add_(S_p.triu(1).transpose(-1,-2))
+        S_p.add_(torch.eye(S_p.shape[-1]).unsqueeze(0))
+        ## calculate matrix square-root S^(1/2)
+        S12 = torch.stack([sqrtm(Si) for Si in S_p])
+        
+        ## construct diag(beta) in contracted format
+        B = torch.zeros((nOrbstot, 4, 4), dtype=dtype, device=device)
+        B[maskd,0,0] = beta[:,0]
+        for i in range(1,4): B[maskd,i,i] = beta[:,1]
+        ## reshape B into (nmols, nOrbs, nOrbs)
+        B = B.view(nmol, molsize, molsize, 4, 4).transpose(2,3).flatten(1,2).flatten(2,3)
+        ## pack diag(beta)
+        B_p = pack(B, nHeavy, nHydro)
+        ## calculate S^(1/2) diag(beta) S^(1/2)
+        SBS_p = torch.bmm(S12, torch.bmm(B_p, S12))
+        # unpack S^(1/2) diag(beta) S^(1/2) and reshape into contracted format
+        SBS = unpack(SBS_p, nHeavy, nHydro, 4 * molsize)
+        SBS4M = SBS.view(nmol, molsize, 4, molsize, 4).transpose(2,3).flatten(0,2)
+        M = M + SBS4M
+    elif torch.is_tensor(Kbeta):
+        ## Resonance integrals given by S_ij * (beta_i + beta_j)/2 * Kbeta
         M[mask,0,0]   = di[...,0,0]*(beta[idxi,0]+beta[idxj,0])/2.0 * Kbeta[:,0]
         M[mask,0,1:]  = di[...,0,1:]*(beta[idxi,0:1]+beta[idxj,1:2])/2.0 * Kbeta[:,1,None]
         M[mask,1:,0]  = di[...,1:,0]*(beta[idxi,1:2]+beta[idxj,0:1])/2.0 * Kbeta[:,2,None]
         M[mask,1:,1:] = di[...,1:,1:]*(beta[idxi,1:2,None]+beta[idxj,1:2,None])/2.0 * Kbeta[:,3:,None]
         #raise ValueError('Kbeta for each pair is not implemented yet')
     else:
+        ## Resonance integrals given by S_ij * (beta_i + beta_j)/2
         #beta is for each atom in the molecules, shape (ntotatoms,2)
         M[mask,0,0]   = di[...,0,0]*(beta[idxi,0]+beta[idxj,0])/2.0
         M[mask,0,1:]  = di[...,0,1:]*(beta[idxi,0:1]+beta[idxj,1:2])/2.0

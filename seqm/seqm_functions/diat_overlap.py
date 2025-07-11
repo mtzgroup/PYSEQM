@@ -1,6 +1,6 @@
 import torch
 
-def diatom_overlap_matrix(ni,nj, xij, rij, zeta_a, zeta_b, qn_int):
+def diatom_overlap_matrix(ni, nj, xij, rij, zeta_a, zeta_b, qn_int):
     """
     compute the overlap matrix for each pair
     """
@@ -20,29 +20,18 @@ def diatom_overlap_matrix(ni,nj, xij, rij, zeta_a, zeta_b, qn_int):
     # output di: overlap matrix between AOs from atom i an j, shape (npairs, 4,4)
     # 0,1,2,3: sigma, px, py, pz
 
-
-    xy = torch.norm(xij[...,:2],dim=1)
-
-    #``self.where(condition, y)`` is equivalent to ``torch.where(condition, self, y)``.
-
-    tmp = torch.where(xij[...,2]<0.0,torch.tensor(-1.0,dtype=dtype, device=device), \
-          torch.where(xij[...,2]>0.0,torch.tensor(1.0,dtype=dtype, device=device), \
-          torch.tensor(0.0,dtype=dtype, device=device)))
-
-    #ca = torch.where(xy>=1.0e-10, xij[...,0]/xy, tmp)
-    cond_xy = xy>=1.0e-10
-    ca = tmp.clone()
-    ca[cond_xy] = xij[cond_xy,0]/xy[cond_xy]
-
-    cb = torch.where(xy>=1.0e-10, xij[...,2], tmp)  #xij is a unti vector already
-    #cb = torch.where(xy>=1.0e-10, xij[...,2]/rij, tmp)
-    #del tmp
-    #sa = torch.where(xy>=1.0e-10, xij[...,1]/xy, torch.tensor(0.0,dtype=dtype, device=device))
+    xy = xij[...,:2].square().sum(dim=1)
+    sgn_zij = xij[...,2].sgn()
+    cond_xy = xy >= 1e-18
+    ca = sgn_zij.clone()
+    ca[cond_xy] = xij[cond_xy,0] / xy[cond_xy].sqrt()
+    cb = sgn_zij.clone()
+    cb[cond_xy] = xij[cond_xy,2]
     sa = torch.zeros_like(xy)
-
-    sa[cond_xy] = xij[cond_xy,1]/xy[cond_xy]
-    #sb = torch.where(xy>=1.0e-10, xy/rij, torch.tensor(0.0,dtype=dtype))
-    sb = torch.where(xy>=1.0e-10, xy, torch.tensor(0.0,dtype=dtype, device=device))
+    sa[cond_xy] = xij[cond_xy,1] / xy[cond_xy].sqrt()
+    sb = torch.zeros_like(xy)
+    sb[cond_xy] = xy[cond_xy].sqrt()
+    
     ################################
     #ok to use torch.where here as postion doesn't require grad
     #if update to do MD, ca, cb, sa, sb should be chaneged to the indexing version
@@ -158,7 +147,7 @@ def diatom_overlap_matrix(ni,nj, xij, rij, zeta_a, zeta_b, qn_int):
     #form di
     #check di_index.txt
 
-    di=torch.zeros((npairs,4,4),dtype=dtype, device=device)
+    di = torch.zeros((npairs,4,4), dtype=dtype, device=device)
 
     # diat coe
     # c : computed in coe, with shape (75)

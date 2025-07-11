@@ -1,8 +1,10 @@
 import torch
+from torch.autograd import grad as adgrad
 from .basics import *
-import time
-from seqm.XLBOMD import ForceXL
+from .XLBOMD import ForceXL
 #from seqm.XLBOMD_LR import ForceXL as ForceXL_lr
+from .harmonic import harmonic_analysis, nestedmap_unary, curve2freq
+
 
 class Electronic_Structure(torch.nn.Module):
     def __init__(self, seqm_parameters, *args, **kwargs):
@@ -19,8 +21,9 @@ class Electronic_Structure(torch.nn.Module):
         self.conservative_force = Force(self.seqm_parameters)
         self.conservative_force_xl = ForceXL(self.seqm_parameters)
         #self.conservative_force_xl_lr = ForceXL_lr(self.seqm_parameters)
-
-
+        self.do_hessian = seqm_parameters.get("hessian", False)
+        self.keep_graph = seqm_parameters.get("2nd_grad", False)
+        
         #self.acc_scale = 0.009648532800137615
         #self.output = output
     
@@ -39,7 +42,7 @@ class Electronic_Structure(torch.nn.Module):
     def dipole(q, coordinates, com2zero=True):
         R = coordinates - coordinates.mean(dim=1).unsqueeze(1) if com2zero else coordinates
         return torch.sum( q.unsqueeze(2) * R, dim=1 )
-
+    
     def forward(self, molecule, learned_parameters=dict(), xl_bomd_params=dict(), P0=None, err_threshold = None, max_rank = None, T_el = None, dm_prop='SCF', *args, **kwargs):
         """
         return force in unit of eV/Angstrom
@@ -48,6 +51,21 @@ class Electronic_Structure(torch.nn.Module):
         if dm_prop=='SCF':
             molecule.force, P, molecule.Hf, molecule.Etot, molecule.Eelec, molecule.Enuc, molecule.Eiso, molecule.e_mo, molecule.e_gap, C, self.charge, self.notconverged = \
                         self.conservative_force(molecule, P0=P0, learned_parameters=learned_parameters, *args, **kwargs)
+            if self.do_hessian:
+                # vmap doesn't work due to dynamic shapes in PYSEQM
+                # as a result, this is quite inefficient for batches!
+                _3n = molecule.molsize * 3
+                e_vecs = torch.eye(_3n, device=molecule.force.device)
+                g_flat = -molecule.force.view(molecule.nmol, _3n)
+                molecule.hessian = torch.stack([torch.stack(
+                                                   [adgrad(g, molecule.coordinates, ev, retain_graph=True)[0][i]
+                                                for ev in e_vecs]) for i, g in enumerate(g_flat)]
+                                              ).view(molecule.nmol, _3n, _3n)
+                
+                curve, molecule.vib_modes = harmonic_analysis(molecule.mass, molecule.coordinates,
+                                                              molecule.hessian)
+                molecule.vib_freqs = nestedmap_unary(curve2freq, curve)
+            if not self.keep_graph: molecule.force.detach_()
             molecule.dm = P.detach()
             molecule.mo_coeff = C#.detach() # detach needed?
             

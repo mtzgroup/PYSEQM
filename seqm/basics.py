@@ -1,9 +1,10 @@
 import torch
 from .seqm_functions.scf_loop import scf_loop
 from .seqm_functions.energy import *
-from .seqm_functions.parameters import params
+from .seqm_functions.parameters import atom_params, pair_params
 from torch.autograd import grad
-from .seqm_functions.constants import ev
+from .seqm_functions.constants import ev, a0
+from copy import deepcopy as dcopy
 import os
 import time
 
@@ -11,22 +12,54 @@ import time
 Semi-Emperical Quantum Mechanics: AM1/MNDO/PM3
 """
 
-parameterlist={'AM1':['U_ss', 'U_pp', 'zeta_s', 'zeta_p','beta_s', 'beta_p',
+parameterlist={'AM1':[
+                      ## electronic       
+                      'U_ss', 'U_pp', 'zeta_s', 'zeta_p','beta_s', 'beta_p',
                       'g_ss', 'g_sp', 'g_pp', 'g_p2', 'h_sp',
+                      ## core-core repulsion
                       'alpha',
                       'Gaussian1_K', 'Gaussian2_K', 'Gaussian3_K','Gaussian4_K',
                       'Gaussian1_L', 'Gaussian2_L', 'Gaussian3_L','Gaussian4_L',
                       'Gaussian1_M', 'Gaussian2_M', 'Gaussian3_M','Gaussian4_M'
                      ],
-                'MNDO':['U_ss', 'U_pp', 'zeta_s', 'zeta_p','beta_s', 'beta_p',
-                        'g_ss', 'g_sp', 'g_pp', 'g_p2', 'h_sp', 'alpha'],
-                'PM3':['U_ss', 'U_pp', 'zeta_s', 'zeta_p','beta_s', 'beta_p',
+                'AM1_PDREP':[
+                      ## electronic
+                      'U_ss', 'U_pp', 'zeta_s', 'zeta_p','beta_s', 'beta_p',
+                      'g_ss', 'g_sp', 'g_pp', 'g_p2', 'h_sp',
+                      ## core-core repulsion
+                      'g_ss_nuc', 'alpha', 'chi', 'mu', 'nu',
+                      'Gaussian1_K', 'Gaussian2_K', 'Gaussian3_K','Gaussian4_K',
+                      'Gaussian1_L', 'Gaussian2_L', 'Gaussian3_L','Gaussian4_L',
+                      'Gaussian1_M', 'Gaussian2_M', 'Gaussian3_M','Gaussian4_M'
+                     ],
+                'MNDO':[
+                        ## electronic       
+                        'U_ss', 'U_pp', 'zeta_s', 'zeta_p','beta_s', 'beta_p',
+                        'g_ss', 'g_sp', 'g_pp', 'g_p2', 'h_sp',
+                        ## core-core repulsion
+                        'alpha'],
+                'PM3':[
+                       ## electronic
+                       'U_ss', 'U_pp', 'zeta_s', 'zeta_p','beta_s', 'beta_p',
                        'g_ss', 'g_sp', 'g_pp', 'g_p2', 'h_sp',
+                       ## core-core repulsion
                        'alpha',
                        'Gaussian1_K', 'Gaussian2_K',
                        'Gaussian1_L', 'Gaussian2_L',
                        'Gaussian1_M', 'Gaussian2_M'
                       ]}
+
+atom_parameters = dcopy(parameterlist)
+atom_parameters['AM1_PDREP'] = ['U_ss', 'U_pp', 'zeta_s', 'zeta_p','beta_s', 'beta_p',
+                                'g_ss', 'g_sp', 'g_pp', 'g_p2', 'h_sp', 'g_ss_nuc',
+                                'Gaussian1_K', 'Gaussian2_K', 'Gaussian3_K','Gaussian4_K',
+                                'Gaussian1_L', 'Gaussian2_L', 'Gaussian3_L','Gaussian4_L',
+                                'Gaussian1_M', 'Gaussian2_M', 'Gaussian3_M','Gaussian4_M']
+pair_parameters = {'AM1':[], 'AM1_PDREP':['alpha', 'chi', 'mu', 'nu'], 'MNDO':[], 'PM3':[]}
+
+electronic_parameters = {m:['U_ss', 'U_pp', 'zeta_s', 'zeta_p',
+                            'beta_s', 'beta_p', 'g_ss', 'g_sp',
+                            'g_pp', 'g_p2', 'h_sp'] for m in parameterlist.keys()}
 
 class Parser(torch.nn.Module):
     """
@@ -37,7 +70,7 @@ class Parser(torch.nn.Module):
         Constructor
         """
         super(Parser, self).__init__()
-        self.outercutoff = seqm_parameters['pair_outer_cutoff']
+        self.outercutoff2 = seqm_parameters.get('pair_outer_cutoff', 1e10)**2
         self.elements = seqm_parameters['elements']
         self.uhf = seqm_parameters.get('UHF', False)
 
@@ -100,7 +133,7 @@ class Parser(torch.nn.Module):
         #
         paircoord_raw = (molecule.coordinates.unsqueeze(1)-molecule.coordinates.unsqueeze(2)).reshape(-1,3)
         pairdist_sq = torch.square(paircoord_raw).sum(dim=1)
-        close_pairs = pairdist_sq < self.outercutoff**2
+        close_pairs = pairdist_sq < self.outercutoff2
 
         pairs = (pair_first<pair_second) * nonblank_pairs * close_pairs
 
@@ -130,6 +163,7 @@ class Parser(torch.nn.Module):
                 nHeavy, nHydro, nocc, \
                 Z, maskd, atom_molid, \
                 mask, pair_molid, ni, nj, idxi, idxj, xij, rij
+    
 
 class Parser_For_Ovr(torch.nn.Module):
     """
@@ -140,7 +174,7 @@ class Parser_For_Ovr(torch.nn.Module):
         Constructor
         """
         super(Parser_For_Ovr, self).__init__()
-        self.outercutoff = seqm_parameters['pair_outer_cutoff']
+        self.outercutoff2 = seqm_parameters.get('pair_outer_cutoff', 1e10)**2
         self.elements = seqm_parameters['elements']
 
     def forward(self, constants, species, coordinates, *args, **kwargs):
@@ -193,7 +227,7 @@ class Parser_For_Ovr(torch.nn.Module):
         #
         paircoord_raw = (coordinates.unsqueeze(1) - coordinates.unsqueeze(2)).reshape(-1,3)
         pairdist_sq = torch.square(paircoord_raw).sum(dim=1)
-        close_pairs = pairdist_sq < self.outercutoff**2
+        close_pairs = pairdist_sq < self.outercutoff2
 
         pairs = (pair_first<=pair_second) * nonblank_pairs * close_pairs
 
@@ -216,6 +250,7 @@ class Parser_For_Ovr(torch.nn.Module):
                nHeavy, nHydro, nocc, \
                Z, maskd, atom_molid, \
                mask, pair_molid, ni, nj, idxi, idxj, xij, rij
+    
 
 class Pack_Parameters(torch.nn.Module):
     """
@@ -237,20 +272,32 @@ class Pack_Parameters(torch.nn.Module):
             if 'parameter_file_dir' in seqm_parameters \
             else os.path.abspath(os.path.dirname(__file__))+'/params/'
         self.parameters = parameterlist[self.method]
-        self.required_list = []
+        self.atom_parameters = atom_parameters[self.method]
+        self.pair_parameters = pair_parameters[self.method]
+        self.atom_req_list, self.pair_req_list = [], []
         for i in self.parameters:
-            if i not in self.learned_list:
-                self.required_list.append(i)
-        self.nrp = len(self.required_list)
-        self.p = params(method=self.method, elements=self.elements,root_dir=self.filedir,
-                 parameters=self.required_list)
-
+            if i in self.learned_list: continue
+            if i in self.atom_parameters:
+                self.atom_req_list.append(i)
+            elif i in self.pair_parameters:
+                self.pair_req_list.append(i)
+        self.atom_dict = atom_params(method=self.method, elements=self.elements,
+                                     root_dir=self.filedir, parameters=self.atom_req_list)
+        self.pair_dict = pair_params(method=self.method, elements=self.elements,
+                                     root_dir=self.filedir, parameters=self.pair_req_list)
+        
     def forward(self, Z, learned_params=dict()):
         """
-        combine the learned_parames with other required parameters
+        combine the learned_params with other required parameters
         """
-        for i in range(self.nrp):
-            learned_params[self.required_list[i]] = self.p[Z,i] #.contiguous()
+        for p_i in self.atom_req_list:
+            p_dense = torch.tensor([self.atom_dict[p_i][z] for z in Z.tolist()],
+                                   device=Z.device).contiguous()
+            learned_params[p_i] = torch.nn.Parameter(p_dense, requires_grad=False)
+        for p_i in self.pair_req_list:
+            p_dense = torch.tensor([[self.pair_dict[p_i][z1][z2] for z1 in Z.tolist()]
+                                    for z2 in Z.tolist()], device=Z.device)
+            learned_params[p_i] = torch.nn.Parameter(p_dense, requires_grad=False).contiguous()
         return learned_params
 
 class Hamiltonian(torch.nn.Module):
@@ -275,6 +322,8 @@ class Hamiltonian(torch.nn.Module):
         # 0: ignore gradient on density matrix from Hellmann Feymann Theorem,
         # 1: use recursive formula go back through scf loop
         # 2: direct backprop through SCF cycle
+        self.ivans_beta = seqm_parameters.get('ivans_beta', False)
+        self.scf_maxiter = seqm_parameters.get('scf_maxiter', 200)
     
     def forward(self, const, molsize, nHeavy, nHydro, nocc, Z, maskd, mask, atom_molid, pair_molid, idxi, idxj, ni,nj,xij,rij, parameters, P0=None):
         """
@@ -337,7 +386,9 @@ class Hamiltonian(torch.nn.Module):
                               scf_converger=self.scf_converger,
                               eig=self.eig,
                               scf_backward=self.scf_backward,
-                              scf_backward_eps=self.scf_backward_eps)
+                              scf_backward_eps=self.scf_backward_eps,
+                              ivans_beta=self.ivans_beta,
+                              scf_maxiter=self.scf_maxiter)
         #
         return F, e, C, P, Hcore, w, charge, notconverged
     
@@ -350,8 +401,9 @@ class Energy(torch.nn.Module):
         super(Energy, self).__init__()
         self.seqm_parameters = seqm_parameters
         self.method = seqm_parameters['method']
-        self.parser = Parser(seqm_parameters)
         self.packpar = Pack_Parameters(seqm_parameters)
+        if seqm_parameters['method'] == 'AM1_PDREP': seqm_parameters['method'] = 'AM1'
+        self.parser = Parser(seqm_parameters)
         self.hamiltonian = Hamiltonian(seqm_parameters)
         self.Hf_flag = seqm_parameters.get('Hf_flag', True)
         self.uhf = seqm_parameters.get('UHF', False)
@@ -390,10 +442,9 @@ class Energy(torch.nn.Module):
             e_gap = None
             
         #nuclear energy
-        alpha = parameters['alpha']
-        if self.method=='MNDO':
-            parnuc = (alpha,)
-        elif self.method=='AM1':
+        if self.method == 'MNDO':
+            parnuc = (parameters['alpha'],)
+        elif self.method == 'AM1':
             K = torch.stack((parameters['Gaussian1_K'],
                              parameters['Gaussian2_K'],
                              parameters['Gaussian3_K'],
@@ -409,8 +460,8 @@ class Energy(torch.nn.Module):
                              parameters['Gaussian3_M'],
                              parameters['Gaussian4_M']),dim=1)
             #
-            parnuc = (alpha, K, L, M)
-        elif self.method=='PM3':
+            parnuc = (parameters['alpha'], K, L, M)
+        elif self.method == 'PM3':
             K = torch.stack((parameters['Gaussian1_K'],
                              parameters['Gaussian2_K']),dim=1)
             #
@@ -420,28 +471,43 @@ class Energy(torch.nn.Module):
             M = torch.stack((parameters['Gaussian1_M'],
                              parameters['Gaussian2_M']),dim=1)
             #
-            parnuc = (alpha, K, L, M)
-
+            parnuc = (parameters['alpha'], K, L, M)
+        elif self.method in ['AM1_PDREP', 'PM6']:
+            K = torch.stack((parameters['Gaussian1_K'],
+                             parameters['Gaussian2_K'],
+                             parameters['Gaussian3_K'],
+                             parameters['Gaussian4_K']),dim=1)
+            L = torch.stack((parameters['Gaussian1_L'],
+                             parameters['Gaussian2_L'],
+                             parameters['Gaussian3_L'],
+                             parameters['Gaussian4_L']),dim=1)
+            M = torch.stack((parameters['Gaussian1_M'],
+                             parameters['Gaussian2_M'],
+                             parameters['Gaussian3_M'],
+                             parameters['Gaussian4_M']),dim=1)
+            parnuc = (parameters['alpha'], parameters['chi'], parameters['mu'],
+                      parameters['nu'], K, L, M)
+        
         if 'g_ss_nuc' in parameters:
             g = parameters['g_ss_nuc']
             rho0a = 0.5 * ev / g[idxi]
             rho0b = 0.5 * ev / g[idxj]
-            gam = ev / torch.sqrt(rij**2 + (rho0a + rho0b)**2)
+            gam = ev / torch.sqrt(rij * rij + (rho0a + rho0b)**2)
         else:
             gam = w[...,0,0]
 
         EnucAB = pair_nuclear_energy(molecule.const, nmol, ni, nj, idxi, idxj, rij, gam=gam, method=self.method, parameters=parnuc)
         Eelec = elec_energy(P, F, Hcore)
         if all_terms:
-            Etot, Enuc = total_energy(nmol, pair_molid,EnucAB, Eelec)
+            Etot, Enuc = total_energy(nmol, pair_molid, EnucAB, Eelec)
             Eiso = elec_energy_isolated_atom(molecule.const, Z,
-                                         uss=parameters['U_ss'],
-                                         upp=parameters['U_pp'],
-                                         gss=parameters['g_ss'],
-                                         gpp=parameters['g_pp'],
-                                         gsp=parameters['g_sp'],
-                                         gp2=parameters['g_p2'],
-                                         hsp=parameters['h_sp'])
+                                             uss=parameters['U_ss'],
+                                             upp=parameters['U_pp'],
+                                             gss=parameters['g_ss'],
+                                             gpp=parameters['g_pp'],
+                                             gsp=parameters['g_sp'],
+                                             gp2=parameters['g_p2'],
+                                             hsp=parameters['h_sp'])
             Hf, Eiso_sum = heat_formation(molecule.const, nmol,atom_molid, Z, Etot, Eiso, flag = self.Hf_flag)
             return Hf, Etot, Eelec, Enuc, Eiso_sum, EnucAB, e_gap, e, C, P, charge, notconverged
         else:
@@ -457,7 +523,9 @@ class Force(torch.nn.Module):
     def __init__(self, seqm_parameters):
         super(Force, self).__init__()
         self.energy = Energy(seqm_parameters)
-        self.create_graph = seqm_parameters.get('2nd_grad', False)
+        do_hessian = seqm_parameters.get('hessian', False)
+        graph_req = seqm_parameters.get('2nd_grad', False)
+        self.create_graph = do_hessian or graph_req
         self.uhf = seqm_parameters.get('UHF', False)
         self.eig = seqm_parameters.get('eig', False)
         self.seqm_parameters = seqm_parameters
@@ -479,17 +547,17 @@ class Force(torch.nn.Module):
         ## Why not grad(L, gv, ...)?
         #gv = [coordinates]
         #gradients  = grad(L, gv,create_graph=self.create_graph)
-        L.backward(create_graph=self.create_graph)
+        if self.create_graph:
+            force = -grad(Etot.sum(), molecule.coordinates, create_graph=True)[0]
+        else:
+            L.backward()
+            force = -molecule.coordinates.grad.detach()
+            molecule.coordinates.grad.zero_()
+        
         if molecule.const.do_timing:
             if torch.cuda.is_available(): torch.cuda.synchronize()
             t1 = time.time()
             molecule.const.timing["Force"].append(t1-t0)
-        if self.create_graph:
-            force = -molecule.coordinates.grad.clone()
-            with torch.no_grad(): molecule.coordinates.grad.zero_()
-        else:
-            force = -molecule.coordinates.grad.detach()
-            molecule.coordinates.grad.zero_()
         
         # why detach? no external grads?
-        return force.detach(), D.detach(), Hf.detach(), Etot.detach(), Eelec.detach(), Enuc.detach(), Eiso.detach(), e, e_gap, C, charge, notconverged
+        return force, D.detach(), Hf.detach(), Etot.detach(), Eelec.detach(), Enuc.detach(), Eiso.detach(), e, e_gap, C, charge, notconverged

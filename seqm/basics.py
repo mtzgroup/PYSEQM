@@ -324,6 +324,8 @@ class Hamiltonian(torch.nn.Module):
         # 2: direct backprop through SCF cycle
         self.ivans_beta = seqm_parameters.get('ivans_beta', False)
         self.scf_maxiter = seqm_parameters.get('scf_maxiter', 200)
+        self.occ_mode = seqm_parameters.get('occ_mode', 0)
+        self.fermi_kT = seqm_parameters.get('fermi_kT', 0.05)
     
     def forward(self, const, molsize, nHeavy, nHydro, nocc, Z, maskd, mask, atom_molid, pair_molid, idxi, idxj, ni,nj,xij,rij, parameters, P0=None):
         """
@@ -388,7 +390,9 @@ class Hamiltonian(torch.nn.Module):
                               scf_backward=self.scf_backward,
                               scf_backward_eps=self.scf_backward_eps,
                               ivans_beta=self.ivans_beta,
-                              scf_maxiter=self.scf_maxiter)
+                              scf_maxiter=self.scf_maxiter,
+                              occ_mode=self.occ_mode,
+                              kT=self.fermi_kT)
         #
         return F, e, C, P, Hcore, w, charge, notconverged
     

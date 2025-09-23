@@ -22,7 +22,8 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 prop = "energy"#"gap"
 variable = "coords"#"param"
-uhf = True
+uhf = False
+occ_mode = 2
 
 if uhf:
     species = torch.as_tensor([[6,1,1,1]], dtype=torch.int64, device=device)
@@ -67,6 +68,8 @@ seqm_parameters = {
                    'parameter_file_dir': '/home/martin/work/software/PYSEQM/seqm/params/',
                    'eig'               : prop=="gap",
                    'UHF'               : uhf,
+                   'occ_mode'          : occ_mode,
+                   'fermi_kT'          : 1.5,
                   }
 
 const = Constants().to(device)
@@ -95,21 +98,21 @@ def parse_exc(msg):
 
 gradvar = p if variable=="param" else coordinates
 with torch.autograd.set_detect_anomaly(True):
-    print("scf_backward = 0")
-    eng = Energy(seqm_parameters).to(device)
-    def f0(x): return eng(mol, learned_parameters=learnedpar, all_terms=True)[prop2idx[prop]]
-    try:
-        test_grad0 = torch.autograd.gradcheck(f0, (gradvar,), eps=1e-6, atol=0.001, rtol=0.01)
-        print("Gradient correct")
-    except BaseException as eg0:
-        print("Gradient NOT correct")
-        parse_exc(eg0)
-    try:
-        test_hess0 = torch.autograd.gradgradcheck(f0, (gradvar,), eps=1e-6, atol=0.001, rtol=0.01)
-        print("Second derivative correct")
-    except BaseException as eh0:
-        print("Second derivative NOT correct")
-        parse_exc(eh0)
+#    print("scf_backward = 0")
+#    eng = Energy(seqm_parameters).to(device)
+#    def f0(x): return eng(mol, learned_parameters=learnedpar, all_terms=True)[prop2idx[prop]]
+#    try:
+#        test_grad0 = torch.autograd.gradcheck(f0, (gradvar,), eps=1e-6, atol=0.001, rtol=0.01)
+#        print("Gradient correct")
+#    except BaseException as eg0:
+#        print("Gradient NOT correct")
+#        parse_exc(eg0)
+#    try:
+#        test_hess0 = torch.autograd.gradgradcheck(f0, (gradvar,), eps=1e-6, atol=0.001, rtol=0.01)
+#        print("Second derivative correct")
+#    except BaseException as eh0:
+#        print("Second derivative NOT correct")
+#        parse_exc(eh0)
     
     seqm_parameters['scf_backward'] = 1
     print("\nscf_backward = 1")

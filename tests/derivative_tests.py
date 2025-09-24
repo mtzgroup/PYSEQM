@@ -22,8 +22,14 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 prop = "energy"#"gap"
 variable = "coords"#"param"
-uhf = False
-occ_mode = 2
+uhf = True
+occ_mode = 0  ## 0: integer, 2: FON/FOMO/Fermi
+converger = "constant" ## "diis" or "constant"
+
+if converger == "diis":
+    scf_mixer = [4, {}]
+else:
+    scf_mixer = [0, 0.25]
 
 if uhf:
     species = torch.as_tensor([[6,1,1,1]], dtype=torch.int64, device=device)
@@ -40,7 +46,7 @@ else:
     coordinates = torch.tensor([
                   [
                    [0.0000,              0.0000,              0.0000],
-                   [1.22732374,          0.0000,              0.0000],
+                   [1.22832374,          0.0000,              0.0000],
                    [1.8194841064614802,  0.93941263319067747, 0.0000],
                    [1.8193342232738994, -0.93951967178254525, 0.0000]
                   ]
@@ -58,7 +64,7 @@ else:
 seqm_parameters = {
                    'method'            : 'AM1',
                    'scf_eps'           : 1e-9,
-                   'scf_converger'     : [0, 0.25],
+                   'scf_converger'     : scf_mixer,
                    'sp2'               : [False, 1e-5],
                    'elements'          : elements,
                    'learned'           : lpar,

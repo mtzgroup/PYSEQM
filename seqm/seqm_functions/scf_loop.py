@@ -47,7 +47,7 @@ def build_dm(e, v, nocc, occ_mode=0, occ_kT=0.05):
     return D
 
 
-# TODO: abstract and modularize SCF methods further!
+# TODO: abstract and modularize SCF methods (only Fock update differs)!
 
 # DIIS
 def scf_diis(M, w, gss, gpp, gsp, gp2, hsp, nHydro, nHeavy, nOccMO,

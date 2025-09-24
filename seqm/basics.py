@@ -325,7 +325,10 @@ class Hamiltonian(torch.nn.Module):
         self.ivans_beta = seqm_parameters.get('ivans_beta', False)
         self.scf_maxiter = seqm_parameters.get('scf_maxiter', 200)
         self.occ_mode = seqm_parameters.get('occ_mode', 0)
-        self.occ_kT = seqm_parameters.get('occ_kT', 0.05)
+        kT_in = seqm_parameters.get('occ_kT', 0.05)
+        if not torch.is_tensor(kT_in):
+            kT_in = torch.tensor(kT_in, requires_grad=False)
+        self.occ_kT = torch.nn.Parameter(kT_in)
         self.eps_P = seqm_parameters.get('scf_eps_P', 1e-5)
     
     def forward(self, const, molsize, nHeavy, nHydro, nocc, Z, maskd, mask, atom_molid, pair_molid, idxi, idxj, ni,nj,xij,rij, parameters, P0=None):

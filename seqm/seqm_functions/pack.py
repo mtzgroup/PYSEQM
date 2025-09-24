@@ -13,15 +13,17 @@ def packone(x, nho, nHydro, norb):
     return x0
 
 def unpackone(x0, nho, nHydro, size):
-    x = torch.zeros((size, size), dtype=x0.dtype, device=x0.device)
-    x[:nho,:nho] = x0[:nho,:nho]
-    x[:nho,nho:(nho+4*nHydro):4] = x0[:nho, nho:(nho+nHydro)]
-    x[nho:(nho+4*nHydro):4,nho:(nho+4*nHydro):4] = x0[nho:(nho+nHydro),nho:(nho+nHydro)]
-    x[nho:(nho+4*nHydro):4, :nho] = x0[nho:(nho+nHydro), :nho]
+    shapes = torch.tensor(x0.shape, device=x0.device)
+    shapes[-2:] = torch.tensor([size, size], device=x0.device)
+    x = torch.zeros(*shapes, dtype=x0.dtype, device=x0.device)
+    x[...,:nho,:nho] = x0[...,:nho,:nho]
+    x[...,:nho,nho:(nho+4*nHydro):4] = x0[...,:nho, nho:(nho+nHydro)]
+    x[...,nho:(nho+4*nHydro):4,nho:(nho+4*nHydro):4] = x0[...,nho:(nho+nHydro),nho:(nho+nHydro)]
+    x[...,nho:(nho+4*nHydro):4, :nho] = x0[...,nho:(nho+nHydro), :nho]
     return x
 
 def pack(x, nHeavy, nHydro):
-    nho = 4*nHeavy
+    nho = 4 * nHeavy
     if x.dim()==2:
         x0 = packone(x, nHeavy*4, nHydro, nho+nHydro)
     elif x.dim()==4:
@@ -36,10 +38,9 @@ def pack(x, nHeavy, nHydro):
 
 
 def unpack(x0, nHeavy, nHydro, size):
-
+    nho = 4 * nHeavy
     if x0.dim()==2:
-        x = unpackone(x0, nHeavy*4, nHydro, size)
+        x = unpackone(x0, nho, nHydro, size)
     else:
-        nho = 4*nHeavy
         x = torch.stack(list(map(lambda a, b, c : unpackone(a, b, c, size), x0, nho, nHydro)))
     return x

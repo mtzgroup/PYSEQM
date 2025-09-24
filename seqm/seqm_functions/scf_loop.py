@@ -30,30 +30,26 @@ RAISE_ERROR_IF_SCF_BACKWARD_FAILS = False
 # if true, raise error rather than truncate gradient
 # (set the gradient on non-converged molecules as 0.0)
 
-# use memory-efficient evaluation of gradients in implicit autodiff
-SCF_IMPLICIT_BACKWARD = True
 # tolerance, max no. iteration, and history size for Anderson acceleration
-# in solving fixed point problem in SCF_IMPLICIT_BACKWARD
+# in solving fixed point problem
 SCF_BACKWARD_ANDERSON_TOLERANCE = 1e-4  # this seems stable enough, but TODO!
 SCF_BACKWARD_ANDERSON_MAXITER = 50      # sufficient for all test cases
 SCF_BACKWARD_ANDERSON_HISTSIZE = 5      # seems reasonable, but TODO!
 
 
 
-def build_dm(e, v, nocc, occ_mode=0, kT=0.05):
+def build_dm(e, v, nocc, occ_mode=0, occ_kT=0.05):
     """
     occ_mode: int
         occupation type, 0: integer, 1: split among degenerate HOMOs, 2: FON/FOMO/Fermi
     """
-    if e.dim() > 2:
-        raise NotImplementedError("new `build_dm` does not support UHF yet")
     packed_shape = v.shape
     if occ_mode == 0:
         f = integer_occ(e, packed_shape, nocc)
     elif occ_mode == 1:
         f = smeared_degen_occ(e, packed_shape, nocc)
     elif occ_mode == 2:
-        f = fractional_occ(e, packed_shape, nocc, kT=kT)
+        f = fractional_occ(e, packed_shape, nocc, kT=occ_kT)
     else:
         raise ValueError("Invalid `occ_mode`. Expected one of 0, 1, or 2, but got "+str(occ_mode)+".")
     D = torch.einsum("...ij,...j,...kj->...ik", v, f, v)
@@ -64,26 +60,35 @@ def build_dm(e, v, nocc, occ_mode=0, kT=0.05):
 def scf_diis(M, w, gss, gpp, gsp, gp2, hsp, nHydro, nHeavy, nOccMO,
              nmol, molsize, maskd, mask, idxi, idxj, P, eps_E,
              sp2=[False], alpha=0.0, backward=False, scf_maxiter=200,
-             occ_mode="integer", kT=0.05, eps_P=1e-6, diis_start=2,
+             occ_mode="integer", occ_kT=0.05, eps_P=1e-5, diis_start=2,
              diis_max=8, detach_diis=True, compress_rank=None):
-    if P.dim() == 4:
-        raise NotImplementedError("DIIS does not support UHF yet")
-    delta_E = torch.full(nmol, 1e3, dtype=P.dtype, device=P.device)
-    delta_P = torch.full(nmol, 1e3, dtype=P.dtype, device=P.device)
+    delta_E = torch.full((nmol,), 1e3, dtype=P.dtype, device=P.device)
+    delta_P = torch.full((nmol,), 1e3, dtype=P.dtype, device=P.device)
     notconv = torch.ones(nmol, dtype=torch.bool, device=M.device)
+    if P.dim() == 4:
+        get_fock_mat, div = fock_u_batch, 2
+    else:
+        get_fock_mat, div = fock, 1
     
-    F = fock(nmol, molsize, P, M, maskd, mask, idxi, idxj, w, gss,
-             gpp, gsp, gp2, hsp)
+    F = get_fock_mat(nmol, molsize, P, M, maskd, mask, idxi, idxj, w, gss,
+                     gpp, gsp, gp2, hsp)
     Hcore = M.reshape(nmol, molsize, molsize, 4, 4).transpose(2,3) \
              .reshape(nmol, 4*molsize, 4*molsize)
     Eel = elec_energy(P, F, Hcore)
     Eel_old = Eel.clone()
     
-    extrapolator = DIIS(n_mol=nmol, n=molsize, k_max=diis_max,
+    extrapolator = DIIS(n_mol=nmol, n=4*molsize, k_max=diis_max,
                         compress_rank=compress_rank,
                         device=M.device, dtype=M.dtype)
     Pold = P.clone()
     for k in range(scf_maxiter):
+        e, v = sym_eig_trunc(F[notconv], nHeavy[notconv], nHydro[notconv],
+                             nOccMO[notconv])
+        D = build_dm(e, v, nOccMO[notconv], occ_mode=occ_mode, occ_kT=occ_kT) / div
+        P[notconv] = unpack(D, nHeavy[notconv], nHydro[notconv], F.shape[-1])
+        F = get_fock_mat(nmol, molsize, P, M, maskd, mask, idxi, idxj, w, gss,
+                         gpp, gsp, gp2, hsp)
+        
         err_comm = F @ P - P @ F # einsums?
         extrapolator.append(F, err_comm)
         if (extrapolator.hist_lens >= diis_start).any():
@@ -96,19 +101,14 @@ def scf_diis(M, w, gss, gpp, gsp, gp2, hsp, nHydro, nHeavy, nOccMO,
             else:
                 F = F_diis
 
-        e, v = sym_eig_trunc(F[notconv], nHeavy[notconv], nHydro[notconv],
-                             nOccMO[notconv])
-
-        D = build_dm(e, v, nOccMO[notconv], occ_mode=occ_mode, kT=kT)
-        P[notconv] = unpack(D, nHeavy[notconv], nHydro[notconv], F.shape[-1])
-        delta_P[notconv] = (P.abs() - Pold.abs()).norm((1,2))
+        delta_P[notconv] = (P.abs() - Pold.abs()).norm(dim=(1,2))
         Pold[notconv] = P[notconv]
         
         Eel[notconv] = elec_energy(P[notconv], F[notconv], Hcore[notconv])
         delta_E[notconv] = torch.abs(Eel[notconv] - Eel_old[notconv])
         Eel_old[notconv] = Eel[notconv]
         
-        notconv = delta_E > eps_E | delta_P > eps_P
+        notconv = (delta_E > eps_E).logical_or(delta_P > eps_P)
         if debug:
             end_time = time.time()
             print("scf ", k, delta_E.max().item(), delta_P.max().item(), 
@@ -123,38 +123,30 @@ def scf_diis(M, w, gss, gpp, gsp, gp2, hsp, nHydro, nHeavy, nOccMO,
 def scf_forward0(M, w, gss, gpp, gsp, gp2, hsp, nHydro, nHeavy, nOccMO,
                  nmol, molsize, maskd, mask, idxi, idxj, P, eps,
                  sp2=[False], alpha=0.0, backward=False, scf_maxiter=200,
-                 occ_mode=0, kT=0.05):
+                 occ_mode=0, occ_kT=0.05):
     """
     alpha : mixing parameters, alpha=0.0, directly take the new density matrix
     backward is for testing purpose, default is False
     if want to test scf backward directly through the loop in this function, turn backward to be True
     """
     Pnew = torch.zeros_like(P)
-    err = torch.ones(nmol, dtype=P.dtype, device=P.device)
+    delta_E = torch.ones(nmol, dtype=P.dtype, device=P.device)
     notconverged = torch.ones(nmol,dtype=torch.bool, device=M.device)
-    F = fock(nmol, molsize, P, M, maskd, mask, idxi, idxj, w, gss, gpp, gsp, gp2, hsp)
+    if P.dim() == 4:
+        get_fock_mat, div = fock_u_batch, 2
+    else:
+        get_fock_mat, div = fock, 1
+    
+    F = get_fock_mat(nmol, molsize, P, M, maskd, mask, idxi, idxj, w, gss, gpp, gsp, gp2, hsp)
     Hcore = M.reshape(nmol, molsize, molsize, 4, 4).transpose(2,3) \
              .reshape(nmol, 4*molsize, 4*molsize)
     Eelec = elec_energy(P, F, Hcore)
     Eelec_new = torch.zeros_like(Eelec)
     for k in range(scf_maxiter + 1):
-        if debug:
-            start_time = time.time()
-        if backward:
-            e, v = sym_eig_trunc(F[notconverged], nHeavy[notconverged], nHydro[notconverged],
-                                 nOccMO[notconverged])
-#        elif sp2[0]:
-#            Pnew[notconverged] = unpack(
-#                                        SP2(
-#                                            pack(F[notconverged], nHeavy[notconverged], nHydro[notconverged]),
-#                                            nOccMO[notconverged], sp2[1]
-#                                            ),
-#                                        nHeavy[notconverged], nHydro[notconverged], 4*molsize)
-        else:
-            e, v = sym_eig_trunc(F[notconverged], nHeavy[notconverged], nHydro[notconverged],
-                                 nOccMO[notconverged])
-        
-        D = build_dm(e, v, nOccMO[notconverged], occ_mode=occ_mode, kT=kT)
+        if debug: start_time = time.time()
+        e, v = sym_eig_trunc(F[notconverged], nHeavy[notconverged], nHydro[notconverged],
+                             nOccMO[notconverged])
+        D = build_dm(e, v, nOccMO[notconverged], occ_mode=occ_mode, occ_kT=occ_kT) / div
         Pnew[notconverged] = unpack(D, nHeavy[notconverged], nHydro[notconverged], F.shape[-1])
     
         if backward:
@@ -162,78 +154,21 @@ def scf_forward0(M, w, gss, gpp, gsp, gp2, hsp, nHydro, nHeavy, nOccMO,
         else:
             P[notconverged] = alpha * P[notconverged] + (1.0 - alpha) * Pnew[notconverged]
         
-        F = fock(nmol, molsize, P, M, maskd, mask, idxi, idxj, w, gss, gpp, gsp, gp2, hsp)
+        F = get_fock_mat(nmol, molsize, P, M, maskd, mask, idxi, idxj, w, gss, gpp, gsp, gp2, hsp)
         Eelec_new[notconverged] = elec_energy(P[notconverged], F[notconverged], Hcore[notconverged])
-        err[notconverged] = torch.abs(Eelec_new[notconverged]-Eelec[notconverged])
+        delta_E[notconverged] = torch.abs(Eelec_new[notconverged] - Eelec[notconverged])
         
         Eelec[notconverged] = Eelec_new[notconverged]
-        notconverged = err > eps
+        notconverged = delta_E > eps
         if debug:
             end_time = time.time()
-            print("scf ", k, torch.max(err).item(), torch.sum(notconverged).item(),  end_time-start_time )
+            print("scf ", k, torch.max(delta_E).item(), torch.sum(notconverged).item(),  end_time-start_time )
         if not notconverged.any(): break
     return P, notconverged
 
 
-#use constant mixing, open shell
-def scf_forward0_u(M, w, gss, gpp, gsp, gp2, hsp, nHydro, nHeavy, nOccMO,
-                   nmol, molsize, maskd, mask, idxi, idxj, P, eps=1.0e-5,
-                   sp2=[False], alpha=0.0, backward=False, scf_maxiter=200,
-                   occ_mode=0, kT=0.05):
-    """
-    alpha : mixing parameters, alpha=0.0, directly take the new density matrix
-    backward is for testing purpose, default is False
-    if want to test scf backward directly through the loop in this function, turn backward to be True
-    """
-    P_ab = torch.zeros_like(P)
-    err = torch.ones(nmol, dtype=P.dtype, device=P.device)
-    notconverged = torch.ones(nmol,dtype=torch.bool, device=M.device)
-    
-    F = fock_u_batch(nmol, molsize, P, M, maskd, mask, idxi, idxj, w, gss, gpp, gsp, gp2, hsp)
-    Hcore = M.reshape(nmol, molsize, molsize, 4, 4) \
-             .transpose(2,3) \
-             .reshape(nmol, 4*molsize, 4*molsize)
-    Eelec = elec_energy(P, F, Hcore)
-    Eelec_new = torch.zeros_like(Eelec)
-    for k in range(scf_maxiter + 1):
-        start_time = time.time()
-        if backward:
-            e, v = sym_eig_trunc(F[notconverged], nHeavy[notconverged], nHydro[notconverged],
-                                 nOccMO[notconverged])
-#            P_ab[notconverged] = P_ab[notconverged] / 2
-#        elif sp2[0]:
-#            P_ab[notconverged] = unpack(
-#                                        SP2(
-#                                            pack(F[notconverged], nHeavy[notconverged], nHydro[notconverged]),
-#                                            nOccMO[notconverged], sp2[1]
-#                                            ),
-#                                        nHeavy[notconverged], nHydro[notconverged], 4*molsize)
-        else:
-            e, v = sym_eig_trunc(F[notconverged], nHeavy[notconverged], nHydro[notconverged],
-                            nOccMO[notconverged])
         
-        D = build_dm(e, v, nOccMO[notconverged], occ_mode=occ_mode, kT=kT) / 2
-        D_comp = D.view(-1, *D.shape[-2:])
-        P_ab[notconverged] = unpack(D_comp, nHeavy[notconverged], nHydro[notconverged], F.shape[-1])
-        
-        if backward:
-            P = alpha * P + (1.0 - alpha) * P_ab
-        else:
-            P[notconverged] = alpha * P[notconverged] + (1.0 - alpha) * P_ab[notconverged]
-        
-        F = fock_u_batch(nmol, molsize, P, M, maskd, mask, idxi, idxj, w, gss, gpp, gsp, gp2, hsp)
-        Eelec_new[notconverged] = elec_energy(P[notconverged], F[notconverged], Hcore[notconverged])
-        err[notconverged] = torch.abs(Eelec_new[notconverged]-Eelec[notconverged])
-        Eelec[notconverged] = Eelec_new[notconverged]
-        notconverged = err > eps
-        if debug:
-            end_time = time.time()
-            print("scf ", k, torch.max(err).item(), torch.sum(notconverged).item(),  end_time-start_time )
-        if not notconverged.any(): break
-    return P, notconverged
-
-        
-#adaptive mixing
+# "adaptive mixing"
 def scf_forward1(M, w, gss, gpp, gsp, gp2, hsp, nHydro, nHeavy, nOccMO, 
                  nmol, molsize, maskd, mask, idxi, idxj, P, eps, 
                  sp2=[False], backward=False, scf_maxiter=200):
@@ -769,20 +704,24 @@ class SCF(torch.autograd.Function):
                 nHydro, nHeavy, nOccMO, nmol, molsize,
                 maskd, mask, atom_molid, pair_molid, idxi, idxj, P, eps,
                 scf_converger, use_sp2, scf_backward_eps, scf_maxiter,
-                occ_mode=0, kT=0.05):
-        if scf_converger[0] == 0:
-            if P.dim() == 4:
-                P, notconverged = scf_forward0_u(M, w, gss, gpp, gsp, gp2, hsp,
+                occ_mode=0, occ_kT=0.05, eps_P=1e-5):
+        if scf_converger[0] == 4:
+            diis_start = scf_converger[1].get('diis_start', 2)
+            diis_max = scf_converger[1].get('diis_max', 8)
+            detach_diis = scf_converger[1].get('detach_diis', True)
+            compress_rank = scf_converger[1].get('compress_rank', None)
+            P, notconverged = scf_diis(M, w, gss, gpp, gsp, gp2, hsp, nHydro, nHeavy,
+                                nOccMO, nmol, molsize, maskd, mask, idxi, idxj, P, eps,
+                                scf_maxiter=scf_maxiter, occ_mode=occ_mode, occ_kT=occ_kT,
+                                eps_P=eps_P, diis_start=diis_start, diis_max=diis_max,
+                                detach_diis=detach_diis, compress_rank=compress_rank)
+
+        elif scf_converger[0] == 0:
+            P, notconverged = scf_forward0(M, w, gss, gpp, gsp, gp2, hsp,
                                    nHydro, nHeavy, nOccMO, nmol, molsize,
                                    maskd, mask, idxi, idxj, P, eps, sp2=use_sp2,
                                    alpha=scf_converger[1], scf_maxiter=scf_maxiter,
-                                   occ_mode=occ_mode, kT=kT)
-            else:
-                P, notconverged = scf_forward0(M, w, gss, gpp, gsp, gp2, hsp,
-                                   nHydro, nHeavy, nOccMO, nmol, molsize,
-                                   maskd, mask, idxi, idxj, P, eps, sp2=use_sp2,
-                                   alpha=scf_converger[1], scf_maxiter=scf_maxiter,
-                                   occ_mode=occ_mode, kT=kT)
+                                   occ_mode=occ_mode, occ_kT=occ_kT)
         elif scf_converger[0] == 3: # KSA
             P, notconverged = scf_forward3(M, w, gss, gpp, gsp, gp2, hsp,
                                    nHydro, nHeavy, nOccMO, nmol, molsize,
@@ -799,11 +738,11 @@ class SCF(torch.autograd.Function):
         eps = torch.as_tensor(eps, dtype=M.dtype, device=M.device)
         scf_backward_eps = torch.as_tensor(scf_backward_eps, dtype=M.dtype, device=M.device)
         occ_mode = torch.as_tensor(occ_mode, dtype=int, device=M.device)
-        kT = torch.as_tensor(kT, dtype=M.dtype, device=M.device)
+        occ_kT = torch.as_tensor(occ_kT, dtype=M.dtype, device=M.device)
         ctx.save_for_backward(P, M, w, gss, gpp, gsp, gp2, hsp, \
                               nHydro, nHeavy, nOccMO, \
                               maskd, mask, idxi, idxj, eps, notconverged, \
-                              atom_molid, pair_molid, scf_backward_eps, occ_mode, kT)
+                              atom_molid, pair_molid, scf_backward_eps, occ_mode, occ_kT)
         return P, notconverged
     
     
@@ -813,89 +752,44 @@ class SCF(torch.autograd.Function):
         custom backward of SCF loop
         
         CURRENTLY DOES NOT SUPPORT DOUBLE-BACKWARD!
-        (irrelevant for dE^2/dx^2 or dy/dparam, if y is no derivative itself like forces)
         FOR CORRECT SECOND DERIVATIVES OF DENSITY MATRIX, USE DIRECT BACKPROP.
         """
-        #TODO: clean up when fully switching to implicit autodiff
         Pin, M, w, gss, gpp, gsp, gp2, hsp, \
             nHydro, nHeavy, nOccMO, \
             maskd, mask, idxi, idxj, eps, notconverged, \
             atom_molid, pair_molid, backward_eps, \
-            occ_mode, kT = ctx.saved_tensors
+            occ_mode, occ_kT = ctx.saved_tensors
         nmol = Pin.shape[0]
         molsize = Pin.shape[-1]//4
-        grads, gvind = {}, []
-        gv = [] if SCF_IMPLICIT_BACKWARD else [Pin]
+        grads, gvind, gv = {}, [], []
         for i, st in enumerate([M, w, gss, gpp, gsp, gp2, hsp]):
             if st.requires_grad:
                 gv.append(st)
                 gvind.append(i+1)
             else:
                 grads[i+1] = None
+        
         with torch.enable_grad():
             Pin.requires_grad_(True)
             if Pin.dim() == 4:
-                F = fock_u_batch(nmol, molsize, Pin, M, maskd, mask, idxi, idxj, w, gss, gpp, gsp, gp2, hsp)
-                e, v = sym_eig_trunc(F, nHeavy, nHydro, nOccMO)
-                D = build_dm(e, v, nOccMO, occ_mode=occ_mode, kT=kT) / 2
+                get_fock_mat, div = fock_u_batch, 2
             else:
-                F = fock(nmol, molsize, Pin, M, maskd, mask, idxi, idxj, w, gss, gpp, gsp, gp2, hsp)
-                e, v = sym_eig_trunc(F, nHeavy, nHydro, nOccMO)
-                D = build_dm(e, v, nOccMO, occ_mode=occ_mode, kT=kT)
+                get_fock_mat, div = fock, 1
+            F = get_fock_mat(nmol, molsize, Pin, M, maskd, mask, idxi, idxj, w, gss, gpp, gsp, gp2, hsp)
+            e, v = sym_eig_trunc(F, nHeavy, nHydro, nOccMO)
+            D = build_dm(e, v, nOccMO, occ_mode=occ_mode, occ_kT=occ_kT) / div
             Pout = unpack(D, nHeavy, nHydro, F.shape[-1])
         
-        if SCF_IMPLICIT_BACKWARD:
-            ## THIS DOES NOT SUPPORT DOUBLE BACKWARD. MAY AS WELL STOP AUTOGRAD TAPE
-            ## TODO: INCLUDING THIS PART IN GRAPH CAUSES MEMORY LEAK.
-            ##       RESOLVE THIS WHEN IMPLEMENTING DOUBLE-BACKWARD!
-            with torch.no_grad():
-                def affine_eq(u): return grad_P + agrad(Pout, Pin, grad_outputs=u, retain_graph=True)[0]
-                u_init = torch.zeros_like(Pin)  #TODO: better initial guess?
-                u = fixed_point_anderson(affine_eq, u_init)
-                gradients = agrad(Pout, gv, grad_outputs=u, retain_graph=True)
-                for t, i in enumerate(gvind): grads[i] = gradients[t]
-        else:
-            converged = ~notconverged.detach() # scf forward converged
-            diverged = None # scf backward diverged
-            gradients = [(grad_P,)]
-            for k in range(SCF_BACKWARD_MAX_ITER+1):
-                grad0_max_prev = gradients[-1][0].abs().max(dim=-1)[0].max(dim=-1)[0]
-                gradients.append(agrad(Pout, gv, grad_outputs=gradients[-1][0], create_graph=True))
-                grad0_max =  gradients[-1][0].abs().max(dim=-1)[0].max(dim=-1)[0]
-                if converged.any():
-                    err = torch.max(grad0_max[converged])
-                else:
-                    err = torch.tensor(0.0, device=grad_P.device)
-                if debug:
-                    t = grad0_max[converged] > backward_eps
-                    print('backward scf: ', k, err.item(), t.sum().item())
-        
-                if (err < backward_eps): break
-                diverged = (grad0_max > grad0_max_prev) * (grad0_max>=1.0)
-                if diverged.any() and k>=MAX_ITER_TO_STOP_IF_SCF_BACKWARD_DIVERGE:
-                    print("SCF backward diverges for %d molecules, stop after %d iterations" %
-                          (diverged.sum().item(), MAX_ITER_TO_STOP_IF_SCF_BACKWARD_DIVERGE))
-                    break
-            ln = len(gradients)
-            for t, i in enumerate(gvind):
-                grads[i] = torch.sum(torch.stack([gradients[l][t+1] for l in range(1, ln)]), dim=0)
-        
-            with torch.no_grad():
-                #one way is to check grad0.abs().max if they are smaller than backward_eps
-                #another way is to compare grad0.abs().max with previous grad0.abs().max, if
-                #      they are increasing, they are diverging
-                notconverged1 = (grad0_max>backward_eps) + (~torch.isfinite(grad0_max))
-                if notconverged.any():
-                    warnings.warn("SCF forward       : %d/%d not converged" % (notconverged.sum().item(),nmol))
-                if notconverged1.any():
-                    warnings.warn("SCF backward      : %d/%d not converged" % (notconverged1.sum().item(),nmol))
-                    if RAISE_ERROR_IF_SCF_BACKWARD_FAILS:
-                        raise ValueError("SCF backward doesn't converged for some molecules")
-                notconverged = notconverged + notconverged1
-            
+        ## THIS DOES NOT SUPPORT DOUBLE BACKWARD AT THE MOMENT. MAY AS WELL STOP AUTOGRAD TAPE
         with torch.no_grad():
+            def affine_eq(u): return grad_P + agrad(Pout, Pin, grad_outputs=u, retain_graph=True)[0]
+            u_init = torch.zeros_like(Pin)  #TODO: better initial guess?
+            u = fixed_point_anderson(affine_eq, u_init)
+            gradients = agrad(Pout, gv, grad_outputs=u, retain_graph=True)
+            for t, i in enumerate(gvind): grads[i] = gradients[t]
+            
             if notconverged.any():
-                warnings.warn("SCF for/back-ward : %d/%d not converged" % (notconverged.sum().item(),nmol))
+                warnings.warn("SCF forward : %d/%d not converged" % (notconverged.sum().item(),nmol))
                 cond = notconverged.detach()
                 #M, w, gss, gpp, gsp, gp2, hsp
                 #M shape(nmol*molsizes*molsize, 4, 4)
@@ -913,7 +807,7 @@ class SCF(torch.autograd.Function):
                None, None, None, \
                None, None, \
                None, None, None, None, None, None, None, None, \
-               None, None, None, None, None, None
+               None, None, None, None, None, None, None
         
     
 
@@ -925,14 +819,15 @@ class SCF0(SCF):
                None, None, None, \
                None, None, \
                None, None, None, None, None, None, None, None, \
-               None, None, None, None, None, None
+               None, None, None, None, None, None, None
 
 
-def scf_loop(const, molsize, nHeavy, nHydro, nOccMO, \
-            maskd, mask, atom_molid, pair_molid, idxi, idxj, ni, nj, xij, rij, Z, \
-            zetas, zetap, uss, upp , gss, gsp, gpp, gp2, hsp, beta, Kbeta=None, \
-            eps=1e-4, P=None, sp2=[False], scf_converger=[0,0.15], eig=False, scf_backward=0, \
-            scf_backward_eps=1e-2, ivans_beta=False, scf_maxiter=200, occ_mode=0, kT=0.05):
+def scf_loop(const, molsize, nHeavy, nHydro, nOccMO,
+             maskd, mask, atom_molid, pair_molid, idxi, idxj, ni, nj, xij, rij, Z,
+             zetas, zetap, uss, upp , gss, gsp, gpp, gp2, hsp, beta, Kbeta=None,
+             eps=1e-5, P=None, sp2=[False], scf_converger=[0,0.15], eig=False, scf_backward=0,
+             scf_backward_eps=1e-2, ivans_beta=False, scf_maxiter=200, 
+             occ_mode=0, occ_kT=0.05, eps_P=1e-5):
     """
     SCF loop
     # check hcore.py for the details of arguments
@@ -978,18 +873,11 @@ def scf_loop(const, molsize, nHeavy, nHydro, nOccMO, \
             warnings.warn('SP2 is not used for direct backpropagation through scf loop')
             sp2[0] = False
         if scf_converger[0] == 0:
-            if P.dim() == 4:
-                Pconv, notconverged = scf_forward0_u(M, w, gss, gpp, gsp, gp2, hsp,
-                                nHydro, nHeavy, nOccMO, nmol, molsize,
-                                maskd, mask, idxi, idxj, P, eps, sp2=sp2, 
-                                alpha=scf_converger[1], backward=True, scf_maxiter=scf_maxiter,
-                                occ_mode=occ_mode, kT=kT)
-            else:
-                Pconv, notconverged = scf_forward0(M, w, gss, gpp, gsp, gp2, hsp,
+            Pconv, notconverged = scf_forward0(M, w, gss, gpp, gsp, gp2, hsp,
                                 nHydro, nHeavy, nOccMO, nmol, molsize, maskd, mask, 
                                 idxi, idxj, P, eps, sp2=sp2, alpha=scf_converger[1],
                                 backward=True, scf_maxiter=scf_maxiter,
-                                occ_mode=occ_mode, kT=kT)
+                                occ_mode=occ_mode, occ_kT=occ_kT)
         elif scf_converger[0] == 1:
             Pconv, notconverged = scf_forward1(M, w, gss, gpp, gsp, gp2, hsp,
                                 nHydro, nHeavy, nOccMO, nmol, molsize, maskd, mask, 
@@ -1011,7 +899,7 @@ def scf_loop(const, molsize, nHeavy, nHydro, nOccMO, \
                         nHydro, nHeavy, nOccMO, nmol, molsize, maskd, mask,
                         atom_molid, pair_molid, idxi, idxj, P, eps,
                         scf_converger, sp2, scf_backward_eps, scf_maxiter,
-                        occ_mode, kT)
+                        occ_mode, occ_kT, eps_P)
     if notconverged.any():
         nnot = notconverged.type(torch.int).sum().data.item()
 #        warnings.warn("SCF for %d/%d molecules doesn't converge after %d iterations" % (nnot, nmol, MAX_ITER))

@@ -58,7 +58,7 @@ else:
 seqm_parameters = {
                    'method'            : 'AM1',
                    'scf_eps'           : 1e-9,
-                   'scf_converger'     : [0,0.25],
+                   'scf_converger'     : [0, 0.25],
                    'sp2'               : [False, 1e-5],
                    'elements'          : elements,
                    'learned'           : lpar,
@@ -69,7 +69,7 @@ seqm_parameters = {
                    'eig'               : prop=="gap",
                    'UHF'               : uhf,
                    'occ_mode'          : occ_mode,
-                   'fermi_kT'          : 1.5,
+                   'occ_kT'            : 1.8,
                   }
 
 const = Constants().to(device)

@@ -311,7 +311,7 @@ class Hamiltonian(torch.nn.Module):
         super(Hamiltonian, self).__init__()
         #put eps and scf_backward_eps as torch.nn.Parameter such that it is saved with model and can
         #be used to restart jobs
-        self.eps = torch.nn.Parameter(torch.as_tensor(seqm_parameters['scf_eps']), requires_grad=False)
+        self.eps_E = torch.nn.Parameter(torch.as_tensor(seqm_parameters['scf_eps']), requires_grad=False)
         self.sp2 = seqm_parameters.get('sp2', [False])
         self.scf_converger = seqm_parameters['scf_converger']
         # whether return eigenvalues, eigenvectors, otherwise they are None
@@ -383,7 +383,7 @@ class Hamiltonian(torch.nn.Module):
                               hsp=parameters['h_sp'],
                               beta=beta,
                               Kbeta=Kbeta,
-                              eps=self.eps,
+                              eps_E=self.eps_E,
                               P=P0,
                               sp2=self.sp2,
                               scf_converger=self.scf_converger,

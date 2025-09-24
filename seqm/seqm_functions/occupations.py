@@ -45,7 +45,7 @@ def fermi_dirac(e, mu, kT=0.05, clamp_at=54.5):
 
 
 def get_chemical_potential(e, n_el, kT=0.05, tol=1e-9, maxiter=100, clamp_fermi=54.5):
-    """ implicit backward? """
+    """ (implicit) backward? """
     n_mol, norb = e.shape
     mu_lo = e.min(dim=1).values - 50 * kT
     mu_hi = e.max(dim=1).values + 50 * kT

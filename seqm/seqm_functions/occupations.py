@@ -41,7 +41,8 @@ def smeared_degen_occ(e, packed_shape, nocc):
 
 def fermi_dirac(e, mu, kT=0.05, clamp_at=54.5):
     x = (mu.unsqueeze(-1) - e) / kT
-    return torch.sigmoid( x.clamp(-clamp_at, clamp_at) )
+    return torch.sigmoid( x )
+
 
 def get_chemical_potential(e, n_el, kT=0.05, tol=1e-9, maxiter=100, clamp_fermi=54.5):
     """ implicit backward? """
@@ -49,25 +50,40 @@ def get_chemical_potential(e, n_el, kT=0.05, tol=1e-9, maxiter=100, clamp_fermi=
     mu_lo = e.min(dim=1).values - 50 * kT
     mu_hi = e.max(dim=1).values + 50 * kT
     mu = 0.5 * (mu_lo + mu_hi)
-    mu_old = mu.clone()
-    notconv = torch.ones(n_mol, dtype=bool, device=e.device)
-    for i in range(maxiter):
-        f = fermi_dirac(e[notconv], mu[notconv], kT=kT)
-        N_sum = 2. * f.sum(dim=1)
-        dN_dmu = -2. / kT * (f * (1 - f)).sum(1)
-        dmu = (n_el[notconv] - N_sum) / dN_dmu.clamp_min(1e-16)
-        mu_new = mu[notconv] + dmu
+    for it in range(maxiter):
+        f = fermi_dirac(e, mu, kT=kT)
+        delta = 2.0 * f.sum(dim=1) - n_el
+        dN_dmu = 2.0 * torch.sum(f * (1 - f), dim=1) / kT
+        ## for low kT, Newton might fail and overshoot -> resort to bisection
+        if (dN_dmu.abs() < 1e-4).any():
+            break
+        mu_new = mu - delta / dN_dmu
+        if torch.all(torch.abs(mu_new - mu) < tol):
+            return mu_new
+        mu = mu_new
+    
+    # make sure root is in bracket
+    for it in range(10):
+        N_lo = 2.0 * fermi_dirac(e, mu_lo, kT=kT).sum(dim=1)
+        c_lo = N_lo + 1e-6 > n_el
+        N_hi = 2.0 * fermi_dirac(e, mu_hi, kT=kT).sum(dim=1)
+        c_hi = N_hi - 1e-6 < n_el
+        if not ( c_lo.any() or c_hi.any() ): break
+        mu_lo = torch.where(c_lo, mu_lo - 100 * kT, mu_lo)
+        mu_hi = torch.where(c_hi, mu_hi + 100 * kT, mu_hi)
+    if ( c_lo.any() or c_hi.any() ):
+        raise RuntimeError("Failed to bracket root in `get_chemical_potential`.")
+    
+    # fallback to bisection
+    mu = 0.5 * (mu_lo + mu_hi)
+    for it in range(maxiter):
+        N_mid = 2.0 * fermi_dirac(e, mu, kT=kT).sum(dim=1)
+        mu_lo = torch.where(N_mid > n_el, mu_lo, mu)
+        mu_hi = torch.where(N_mid < n_el, mu_hi, mu)
+        mu = (mu_lo + mu_hi) / 2
+        if (mu_hi - mu_lo) / 2 < tol:
+            return mu
 
-        oob = (mu_new < mu_lo[notconv]) | (mu_new > mu_hi[notconv])
-        mu_mid = 0.5 * (mu_lo[notconv] + mu_hi[notconv])
-        mu[notconv] = torch.where(oob, mu_mid, mu_new)
-        too_hi = N_sum > n_el[notconv]
-        mu_lo[notconv] = torch.where(too_hi,  mu[notconv], mu_lo[notconv])
-        mu_hi[notconv] = torch.where(~too_hi, mu[notconv], mu_hi[notconv])
-
-        notconv = (mu - mu_old).abs() > tol
-        if not notconv.any(): break
-        mu_old = mu.clone()
     return mu
 
 def fractional_occ(e, packed_shape, nocc, kT=0.05):
@@ -76,5 +92,6 @@ def fractional_occ(e, packed_shape, nocc, kT=0.05):
     n_el = 2. * nocc
     e_real = e[...,:packed_shape[-1]]
     mu = get_chemical_potential(e_real, n_el, kT=kT)
-    return fermi_dirac(e_real, mu, kT=kT)
+    f = 2. * fermi_dirac(e_real, mu, kT=kT)
+    return f
 

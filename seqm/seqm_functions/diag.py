@@ -246,9 +246,9 @@ def sym_eig_trunc1(x, nheavyatom, nH, nocc, eig_only=False):
 #            P[i] = unpack(P0[i], nheavyatom[i], nH[i], x.shape[-1])
 
 #    if eig_only:
-    print("v", [v_i.shape for v_i in v0])
-    v_out = torch.nested.as_nested_tensor(v0)
-    return e, v_out
+#    print("v", [v_i.shape for v_i in v0])
+#    v_out = torch.nested.as_nested_tensor(v0)
+    return e, v0#v_out
 #    # each column of v is a eigenvectors
 #    # P_alpha_beta = 2.0 * |sum_i c_{i,alpha}*c_{i,beta}, i \in occupied MO
 #    return e, P, v0

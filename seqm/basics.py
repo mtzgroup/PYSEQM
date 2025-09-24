@@ -325,7 +325,8 @@ class Hamiltonian(torch.nn.Module):
         self.ivans_beta = seqm_parameters.get('ivans_beta', False)
         self.scf_maxiter = seqm_parameters.get('scf_maxiter', 200)
         self.occ_mode = seqm_parameters.get('occ_mode', 0)
-        self.fermi_kT = seqm_parameters.get('fermi_kT', 0.05)
+        self.occ_kT = seqm_parameters.get('occ_kT', 0.05)
+        self.eps_P = seqm_parameters.get('scf_eps_P', 1e-5)
     
     def forward(self, const, molsize, nHeavy, nHydro, nocc, Z, maskd, mask, atom_molid, pair_molid, idxi, idxj, ni,nj,xij,rij, parameters, P0=None):
         """
@@ -392,7 +393,8 @@ class Hamiltonian(torch.nn.Module):
                               ivans_beta=self.ivans_beta,
                               scf_maxiter=self.scf_maxiter,
                               occ_mode=self.occ_mode,
-                              kT=self.fermi_kT)
+                              occ_kT=self.occ_kT,
+                              eps_P=self.eps_P)
         #
         return F, e, C, P, Hcore, w, charge, notconverged
     

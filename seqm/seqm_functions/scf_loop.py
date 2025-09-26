@@ -29,7 +29,7 @@ SCF_BACKWARD_ANDERSON_HISTSIZE = 5      # seems reasonable, but TODO!
 
 
 
-def build_dm(e, v, nocc, occ_mode=0, occ_kT=0.05):
+def build_dm(e, v, nocc, occ_mode=0, occ_kT=0.05, smearing="fermi"):
     """
     occ_mode: int
         occupation type, 0: integer, 1: split among degenerate HOMOs, 2: FON/FOMO/Fermi
@@ -40,7 +40,7 @@ def build_dm(e, v, nocc, occ_mode=0, occ_kT=0.05):
     elif occ_mode == 1:
         f = smeared_degen_occ(e, packed_shape, nocc)
     elif occ_mode == 2:
-        f = fractional_occ(e, packed_shape, nocc, kT=occ_kT)
+        f = fractional_occ(e, packed_shape, nocc, kT=occ_kT, smearing=smearing)
     else:
         raise ValueError("Invalid `occ_mode`. Expected one of 0, 1, or 2, but got "+str(occ_mode)+".")
     D = torch.einsum("...ij,...j,...kj->...ik", v, f, v)

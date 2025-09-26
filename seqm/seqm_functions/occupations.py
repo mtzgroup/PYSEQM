@@ -40,14 +40,18 @@ def smeared_degen_occ(e, packed_shape, nocc):
 #  FON / FOMO  #
 ################
 
-def fermi_dirac(e, mu, kT=0.05, clamp_at=54.5):
+def fermi_dirac(e, mu, kT=0.05):
     x = (mu.unsqueeze(-1) - e) / kT
     return torch.sigmoid( x )
 
+def erfc_occ(e, mu, kT=0.05):
+    x = (e - mu) / torch.tensor(2.).sqrt() / kT
+    return torch.erfc(x) / 2
+    
 
-class get_chemical_potential(torch.autograd.Function):
+class _def_get_chemical_potential(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, e, n_el, kT, tol=1e-9, maxiter=100):
+    def forward(ctx, e, n_el, kT, f_smear, tol=1e-12, maxiter=100):
         """
         Solve for chemical potential in Fermi-Dirac occupations
         
@@ -59,6 +63,8 @@ class get_chemical_potential(torch.autograd.Function):
             number of occupied orbitals
         kT: float
             smearing width (KB * electronic temperature)
+        f_smear: callable
+            smearing function. Signature f_smear(eps, mu, kT=kT)
         tol: float
             convergence threshold
         maxiter: int
@@ -69,7 +75,7 @@ class get_chemical_potential(torch.autograd.Function):
         mu = 0.5 * (mu_lo + mu_hi)
         converged = False
         for it in range(maxiter):
-            f = fermi_dirac(e, mu, kT=kT)
+            f = f_smear(e, mu, kT=kT)
             delta = f.sum(dim=-1) - n_el
             dN_dmu = kT.pow(-1) * torch.sum(f * (1 - f), dim=-1)
             ## for low kT, Newton might fail and overshoot -> resort to bisection
@@ -83,9 +89,9 @@ class get_chemical_potential(torch.autograd.Function):
         if not converged:
             # make sure root is in bracket
             for it in range(10):
-                N_lo = fermi_dirac(e, mu_lo, kT=kT).sum(dim=-1)
+                N_lo = f_smear(e, mu_lo, kT=kT).sum(dim=-1)
                 c_lo = N_lo + 1e-6 > n_el
-                N_hi = fermi_dirac(e, mu_hi, kT=kT).sum(dim=-1)
+                N_hi = f_smear(e, mu_hi, kT=kT).sum(dim=-1)
                 c_hi = N_hi - 1e-6 < n_el
                 if not ( c_lo.any() or c_hi.any() ): break
                 mu_lo = torch.where(c_lo, mu_lo - 100 * kT, mu_lo)
@@ -96,7 +102,7 @@ class get_chemical_potential(torch.autograd.Function):
             # fallback to bisection
             mu = 0.5 * (mu_lo + mu_hi)
             for it in range(maxiter):
-                N_mid = fermi_dirac(e, mu, kT=kT).sum(dim=-1)
+                N_mid = f_smear(e, mu, kT=kT).sum(dim=-1)
                 mu_lo = torch.where(N_mid > n_el, mu_lo, mu)
                 mu_hi = torch.where(N_mid < n_el, mu_hi, mu)
                 mu = 0.5 * (mu_lo + mu_hi)
@@ -106,13 +112,14 @@ class get_chemical_potential(torch.autograd.Function):
         if not converged:
             warn("Could not converge chemical potential to desired threshold. Returning best guess.")
             mu_new = mu
+        ctx.f_smear = f_smear
         ctx.save_for_backward(mu_new, e, kT)
         return mu_new
 
     @staticmethod
     def backward(ctx, mu_bar):
         mu_sol, e, kT = ctx.saved_tensors
-        f = fermi_dirac(e, mu_sol, kT=kT)
+        f = ctx.f_smear(e, mu_sol, kT=kT)
         dN_de = kT.pow(-1) * f * (f - 1)
         mu_unsq = mu_sol.unsqueeze(-1)
         nom = (e - mu_unsq) * torch.exp( (e + mu_unsq)/kT )
@@ -123,11 +130,18 @@ class get_chemical_potential(torch.autograd.Function):
         dmu_dkT = -dN_dmu.pow(-1) * dN_dkT
         mu_bar_unsq = mu_bar.unsqueeze(-1)
         return mu_bar_unsq * dmu_de, None, mu_bar_unsq * dmu_dkT, None, None
-
     
+get_chemical_potential = _def_get_chemical_potential.apply
 
-def fractional_occ(e, packed_shape, n_occ, kT=0.05):
+
+def fractional_occ(e, packed_shape, n_occ, kT=0.05, smearing="fermi"):
+    if smearing.lower() in ["fermi", "fermi_dirac"]:
+        f_smear = fermi_dirac
+    elif smearing.lower() in ["erf", "erfc"]:
+        f_smear = erfc_occ
+    else:
+        raise ValueError("Unknown smearing '"+smearing+"'.")
     e_real = e[...,:packed_shape[-1]]
-    mu = get_chemical_potential().apply(e_real, n_occ, kT)
-    return 2. * fermi_dirac(e_real, mu, kT=kT)
+    mu = get_chemical_potential(e_real, n_occ, kT, f_smear)
+    return 2. * f_smear(e_real, mu, kT=kT)
 

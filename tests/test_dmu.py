@@ -12,7 +12,8 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 variable = "eps"
 uhf = False
-kT = torch.tensor(1.5, requires_grad=True)
+kT = torch.tensor(2.5, requires_grad=True)
+smearing = "fermi"
 
 if uhf:
     species = torch.as_tensor([[6,1,1,1]], dtype=torch.int64, device=device)
@@ -41,7 +42,7 @@ elements = [0]+sorted(set(species.reshape(-1).tolist()))
 seqm_parameters = {
                    'method'            : 'AM1',
                    'scf_eps'           : 1e-9,
-                   'scf_converger'     : [0, 0.15],
+                   'scf_converger'     : [4, {}],
                    'sp2'               : [False, 1e-5],
                    'elements'          : elements,
                    'learned'           : [],
@@ -51,8 +52,9 @@ seqm_parameters = {
                    'parameter_file_dir': '/home/martin/work/software/PYSEQM/seqm/params/',
                    'eig'               : True,
                    'UHF'               : uhf,
-                   'occ_mode'          : 0,
+                   'occ_mode'          : 2,
                    'occ_kT'            : kT,
+                   'smearing'          : smearing,
                   }
 
 const = Constants().to(device)
@@ -74,10 +76,10 @@ with torch.autograd.set_detect_anomaly(True):
     eng = Energy(seqm_parameters).to(device)
     res = eng(mol, learned_parameters={}, all_terms=True)
     eps = res[7]
-    print(fractional_occ(eps, res[8][0].shape, n_el, kT))
+    print(fractional_occ(eps, res[8][0].shape, n_el, kT=kT, smearing=smearing))
     eps_in = eps.detach().clone()
     eps_in.requires_grad_(True)
-    def f1(x): return fractional_occ(x, res[8][0].shape, n_el, kT)
+    def f1(x): return fractional_occ(x, res[8][0].shape, n_el, kT=kT, smearing=smearing)
     try:
         test_grad1 = torch.autograd.gradcheck(f1, (eps_in,), eps=1e-6, atol=0.001, rtol=0.01)
         print("Gradient correct")

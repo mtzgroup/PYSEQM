@@ -51,7 +51,7 @@ def erfc_occ(e, mu, kT=0.05):
 
 class _def_get_chemical_potential(torch.autograd.Function):
     @staticmethod
-    def forward(ctx, e, n_el, kT, f_smear, tol=1e-12, maxiter=100):
+    def forward(ctx, e, n_el, kT, f_smear, tol=1e-10, maxiter=100):
         """
         Solve for chemical potential in Fermi-Dirac occupations
         

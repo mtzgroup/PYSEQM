@@ -329,6 +329,7 @@ class Hamiltonian(torch.nn.Module):
         if not torch.is_tensor(kT_in):
             kT_in = torch.tensor(kT_in, requires_grad=False)
         self.occ_kT = torch.nn.Parameter(kT_in)
+        self.smearing = seqm_parameters.get('smearing', 'fermi')
         self.eps_P = seqm_parameters.get('scf_eps_P', 1e-5)
     
     def forward(self, const, molsize, nHeavy, nHydro, nocc, Z, maskd, mask, atom_molid, pair_molid, idxi, idxj, ni,nj,xij,rij, parameters, P0=None):
@@ -397,6 +398,7 @@ class Hamiltonian(torch.nn.Module):
                               scf_maxiter=self.scf_maxiter,
                               occ_mode=self.occ_mode,
                               occ_kT=self.occ_kT,
+                              smearing=self.smearing,
                               eps_P=self.eps_P)
         #
         return F, e, C, P, Hcore, w, charge, notconverged

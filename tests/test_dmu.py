@@ -12,7 +12,7 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
 variable = "eps"
 uhf = False
-kT = torch.tensor(2.5, requires_grad=True)
+kT = torch.tensor(1.5, requires_grad=True)
 smearing = "fermi"
 
 if uhf:
@@ -76,7 +76,7 @@ with torch.autograd.set_detect_anomaly(True):
     eng = Energy(seqm_parameters).to(device)
     res = eng(mol, learned_parameters={}, all_terms=True)
     eps = res[7]
-    print(fractional_occ(eps, res[8][0].shape, n_el, kT=kT, smearing=smearing))
+    print("Occupations", fractional_occ(eps, res[8][0].shape, n_el, kT=kT, smearing=smearing).round(decimals=2).tolist())
     eps_in = eps.detach().clone()
     eps_in.requires_grad_(True)
     def f1(x): return fractional_occ(x, res[8][0].shape, n_el, kT=kT, smearing=smearing)

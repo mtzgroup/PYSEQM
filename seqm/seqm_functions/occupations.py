@@ -1,15 +1,16 @@
 import torch
-from warnings import warn
+from math import sqrt
+from .chemical_potential import _def_get_mu_base
 
 
 ########################
 #  integer occupations #
 ########################
 
-def integer_occ(e, packed_shape, nocc):
-    orb_idx = torch.arange(packed_shape[-1], dtype=e.dtype, device=e.device).repeat(*packed_shape[:-2],1)
+def integer_occ(eps, packed_shape, nocc):
+    orb_idx = torch.arange(packed_shape[-1], dtype=eps.dtype, device=eps.device).repeat(*packed_shape[:-2],1)
     is_occ = orb_idx < nocc.unsqueeze(-1)
-    f = torch.zeros(*packed_shape[:-1], dtype=e.dtype, device=e.device)
+    f = torch.zeros(*packed_shape[:-1], dtype=eps.dtype, device=eps.device)
     f[is_occ] = 2.
     return f
 
@@ -18,21 +19,21 @@ def integer_occ(e, packed_shape, nocc):
 #  split over degenerate HOMOs (ROHF-like) #
 ############################################
 
-def dm_smeared_degen(e, v, nocc):
-    atol = 1.0e-7 if e.dtype==torch.float32 else 1.0e-14
-    cond = (e - e[nocc-1]).abs() < atol
+def dm_smeared_degen(eps, v, nocc):
+    atol = 1.0e-7 if eps.dtype==torch.float32 else 1.0e-14
+    cond = (eps - eps[nocc-1]).abs() < atol
     if cond[nocc:].any():
         c = torch.nonzero(cond)
         indx1 = c[0].item()
         indx2 = c[-1].item()+1
         nd = indx2 - indx1
-        coeff = torch.ones(1, indx2, device=e.device, dtype=e.dtype)
+        coeff = torch.ones(1, indx2, device=eps.device, dtype=eps.dtype)
         coeff[0,indx1:] = (nocc.type(torch.double) - indx1) / nd
         return 2.0 * torch.matmul(coeff * v[:,:indx2], v[:,:indx2].transpose(0,1))
     else:
         return 2.0 * torch.matmul(v[:,:nocc], v[:,:nocc].transpose(0,1))
 
-def smeared_degen_occ(e, packed_shape, nocc):
+def smeared_degen_occ(eps, packed_shape, nocc):
     raise NotImplementedError
 
 
@@ -40,108 +41,74 @@ def smeared_degen_occ(e, packed_shape, nocc):
 #  FON / FOMO  #
 ################
 
-def fermi_dirac(e, mu, kT=0.05):
-    x = (mu.unsqueeze(-1) - e) / kT
-    return torch.sigmoid( x )
+# Fermi-Dirac occupations
+def fermi_dirac(eps, mu, kT=torch.tensor(0.05)):
+    x = (mu.unsqueeze(-1) - eps) * kT.pow(-1)
+    return torch.sigmoid(x)
 
-def erfc_occ(e, mu, kT=0.05):
-    x = (e - mu) / torch.tensor(2.).sqrt() / kT
+class _def_get_mu_fermi(_def_get_mu_base):
+    @staticmethod
+    def smearing(eps, mu, kT=torch.tensor(0.05)):
+        x = (mu.unsqueeze(-1) - eps) * kT.pow(-1)
+        return torch.sigmoid( x )
+    
+    @staticmethod
+    def dn_dmu(eps, mu, kT, f):
+        return (kT.pow(-1) * f * (1 - f)).sum(dim=-1)
+    
+    @staticmethod
+    def dn_de(eps, mu, kT, f):
+        return kT.pow(-1) * f * (f - 1)
+    
+    @staticmethod
+    def dn_dkt(eps, mu, kT):
+        kT_inv = kT.pow(-1)
+        nom = (eps - mu) * torch.exp( (eps + mu) * kT_inv )
+        denom = kT * ( torch.exp(eps * kT_inv) + torch.exp(mu * kT_inv) )
+        return (nom / denom.pow(2)).sum(dim=-1)
+
+    
+# Occupations from "level broadening" [see doi.org/10.1063/1.3436501]
+def erfc_occ(eps, mu, kT=torch.tensor(0.05)):
+    x = (eps - mu) / sqrt(2.) * kT.pow(-1)
     return torch.erfc(x) / 2
+
+class _def_get_mu_erfc(_def_get_mu_base):
+    @staticmethod
+    def smearing(eps, mu, kT=torch.tensor(0.05)):
+        x = (eps - mu) / sqrt(2.) * kT.pow(-1)
+        return torch.erfc(x) / 2
+    
+    @staticmethod
+    def dn_dmu(eps, mu, kT, f):
+        x = -((eps - mu) * kT.pow(-1)).pow(2) / 2
+        terms = torch.exp(x) / sqrt(2. * torch.pi) * kT.pow(-1)
+        return torch.sum(terms, dim=-1)
+    
+    @staticmethod
+    def dn_de(eps, mu, kT, f):
+        x = -((eps - mu) * kT.pow(-1)).pow(2) / 2
+        return -torch.exp(x) / sqrt(2. * torch.pi) * kT.pow(-1)
+    
+    @staticmethod
+    def dn_dkt(eps, mu, kT):
+        x = -((eps - mu) * kT.pow(-1)).pow(2) / 2
+        terms = torch.exp(x) / sqrt(2. * torch.pi) * kT.pow(-2)
+        return torch.sum((eps - mu) * terms, dim=-1)
     
 
-class _def_get_chemical_potential(torch.autograd.Function):
-    @staticmethod
-    def forward(ctx, e, n_el, kT, f_smear, tol=1e-10, maxiter=100):
-        """
-        Solve for chemical potential in Fermi-Dirac occupations
-        
-        Parameters
-        ----------
-        e: torch.Tensor
-            orbital energies
-        n_el: torch.Tensor
-            number of occupied orbitals
-        kT: float
-            smearing width (KB * electronic temperature)
-        f_smear: callable
-            smearing function. Signature f_smear(eps, mu, kT=kT)
-        tol: float
-            convergence threshold
-        maxiter: int
-            maximum number of iterations
-        """
-        mu_lo = e.min(dim=-1).values - 50 * kT
-        mu_hi = e.max(dim=-1).values + 50 * kT
-        mu = 0.5 * (mu_lo + mu_hi)
-        converged = False
-        for it in range(maxiter):
-            f = f_smear(e, mu, kT=kT)
-            delta = f.sum(dim=-1) - n_el
-            dN_dmu = kT.pow(-1) * torch.sum(f * (1 - f), dim=-1)
-            ## for low kT, Newton might fail and overshoot -> resort to bisection
-            if (dN_dmu.abs() < 1e-4).any(): break
-            mu_new = mu - delta / dN_dmu
-            if torch.all(torch.abs(mu_new - mu) < tol):
-                converged = True
-                break
-            mu = mu_new
-        
-        if not converged:
-            # make sure root is in bracket
-            for it in range(10):
-                N_lo = f_smear(e, mu_lo, kT=kT).sum(dim=-1)
-                c_lo = N_lo + 1e-6 > n_el
-                N_hi = f_smear(e, mu_hi, kT=kT).sum(dim=-1)
-                c_hi = N_hi - 1e-6 < n_el
-                if not ( c_lo.any() or c_hi.any() ): break
-                mu_lo = torch.where(c_lo, mu_lo - 100 * kT, mu_lo)
-                mu_hi = torch.where(c_hi, mu_hi + 100 * kT, mu_hi)
-            if ( c_lo.any() or c_hi.any() ):
-                raise RuntimeError("Failed to bracket root in `get_chemical_potential`.")
-            
-            # fallback to bisection
-            mu = 0.5 * (mu_lo + mu_hi)
-            for it in range(maxiter):
-                N_mid = f_smear(e, mu, kT=kT).sum(dim=-1)
-                mu_lo = torch.where(N_mid > n_el, mu_lo, mu)
-                mu_hi = torch.where(N_mid < n_el, mu_hi, mu)
-                mu = 0.5 * (mu_lo + mu_hi)
-                if ((mu_hi - mu_lo) < 2. * tol).all():
-                    mu_new, converged = mu, True
-                    break
-        if not converged:
-            warn("Could not converge chemical potential to desired threshold. Returning best guess.")
-            mu_new = mu
-        ctx.f_smear = f_smear
-        ctx.save_for_backward(mu_new, e, kT)
-        return mu_new
-
-    @staticmethod
-    def backward(ctx, mu_bar):
-        mu_sol, e, kT = ctx.saved_tensors
-        f = ctx.f_smear(e, mu_sol, kT=kT)
-        dN_de = kT.pow(-1) * f * (f - 1)
-        mu_unsq = mu_sol.unsqueeze(-1)
-        nom = (e - mu_unsq) * torch.exp( (e + mu_unsq)/kT )
-        denom = kT * ( torch.exp(e/kT) + torch.exp(mu_unsq/kT) )
-        dN_dkT = (nom / denom.pow(2)).sum(dim=-1)
-        dN_dmu = kT.pow(-1) * torch.sum(f * (1 - f), dim=-1).unsqueeze(-1)
-        dmu_de = -dN_dmu.pow(-1) * dN_de
-        dmu_dkT = -dN_dmu.pow(-1) * dN_dkT
-        mu_bar_unsq = mu_bar.unsqueeze(-1)
-        return mu_bar_unsq * dmu_de, None, mu_bar_unsq * dmu_dkT, None, None
-    
-get_chemical_potential = _def_get_chemical_potential.apply
-
-
-def fractional_occ(e, packed_shape, n_occ, kT=0.05, smearing="fermi"):
+def fractional_occ(eps, packed_shape, n_occ, kT=torch.tensor(0.05),
+                   smearing="fermi"):
     if smearing.lower() in ["fermi", "fermi_dirac"]:
         f_smear = fermi_dirac
+        get_chemical_potential = _def_get_mu_fermi.apply
     elif smearing.lower() in ["erf", "erfc"]:
         f_smear = erfc_occ
+        get_chemical_potential = _def_get_mu_erfc.apply
     else:
         raise ValueError("Unknown smearing '"+smearing+"'.")
-    e_real = e[...,:packed_shape[-1]]
-    mu = get_chemical_potential(e_real, n_occ, kT, f_smear)
+    e_real = eps[...,:packed_shape[-1]]
+    mu = get_chemical_potential(e_real, kT, n_occ)
     return 2. * f_smear(e_real, mu, kT=kT)
+    
 

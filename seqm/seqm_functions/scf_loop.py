@@ -29,7 +29,7 @@ SCF_BACKWARD_ANDERSON_HISTSIZE = 5      # seems reasonable, but TODO!
 
 
 
-def build_dm(e, v, nocc, occ_mode=0, occ_kT=0.05, smearing="fermi"):
+def build_dm(e, v, nocc, occ_mode=0, occ_kT=torch.tensor(0.05), smearing="fermi"):
     """
     occ_mode: int
         occupation type, 0: integer, 1: split among degenerate HOMOs, 2: FON/FOMO/Fermi
@@ -53,7 +53,7 @@ def build_dm(e, v, nocc, occ_mode=0, occ_kT=0.05, smearing="fermi"):
 def scf_diis(M, w, gss, gpp, gsp, gp2, hsp, nHydro, nHeavy, nOccMO,
              nmol, molsize, maskd, mask, idxi, idxj, P, eps_E,
              sp2=[False], alpha=0.0, backward=False, scf_maxiter=200,
-             occ_mode="integer", occ_kT=0.05, smearing="fermi", 
+             occ_mode="integer", occ_kT=torch.tensor(0.05), smearing="fermi", 
              eps_P=1e-5, diis_start=2, diis_max=8, detach_diis=True,
              compress_rank=None):
     notconv = torch.ones(nmol, dtype=torch.bool, device=M.device)
@@ -123,7 +123,8 @@ def scf_diis(M, w, gss, gpp, gsp, gp2, hsp, nHydro, nHeavy, nOccMO,
 def scf_constmix(M, w, gss, gpp, gsp, gp2, hsp, nHydro, nHeavy, nOccMO,
                  nmol, molsize, maskd, mask, idxi, idxj, P, eps_E,
                  sp2=[False], alpha=0.0, backward=False, scf_maxiter=200,
-                 occ_mode=0, occ_kT=0.05, smearing="fermi", eps_P=1e-5):
+                 occ_mode=0, occ_kT=torch.tensor(0.05), smearing="fermi",
+                 eps_P=1e-5):
     """
     alpha : mixing parameters, alpha=0.0, directly take the new density matrix
     backward is for testing purpose, default is False
@@ -255,7 +256,8 @@ class SCF(torch.autograd.Function):
                 nHydro, nHeavy, nOccMO, nmol, molsize,
                 maskd, mask, atom_molid, pair_molid, idxi, idxj, P, eps_E,
                 scf_converger, use_sp2, scf_backward_eps, scf_maxiter,
-                occ_mode=0, occ_kT=0.05, smearing="fermi", eps_P=1e-5):
+                occ_mode=0, occ_kT=torch.tensor(0.05), smearing="fermi",
+                eps_P=1e-5):
         if scf_converger[0] == 4:
             diis_start = scf_converger[1].get('diis_start', 2)
             diis_max = scf_converger[1].get('diis_max', 8)
@@ -380,7 +382,8 @@ def scf_loop(const, molsize, nHeavy, nHydro, nOccMO,
              zetas, zetap, uss, upp , gss, gsp, gpp, gp2, hsp, beta, Kbeta=None,
              eps_E=1e-5, P=None, sp2=[False], scf_converger=[0,0.15], eig=False, scf_backward=0,
              scf_backward_eps=1e-2, ivans_beta=False, scf_maxiter=200, 
-             occ_mode=0, occ_kT=0.05, smearing="fermi", eps_P=1e-5):
+             occ_mode=0, occ_kT=torch.tensor(0.05), smearing="fermi",
+             eps_P=1e-5):
     """
     SCF loop
     # check hcore.py for the details of arguments

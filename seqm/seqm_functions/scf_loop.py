@@ -7,8 +7,8 @@ from .energy import elec_energy
 from .pack import *
 from .diag import sym_eig_trunc, sym_eig_trunc1
 from .occupations import integer_occ, smeared_degen_occ, fractional_occ
-from .diis import DIIS
-from .stubs_scf_loop import scf_forward1, scf_forward2, scf_forward3
+from .diis import SimpleDIIS
+from .orig_scf_forwards import scf_forward1, scf_forward2, scf_forward3
 import warnings
 import time
 
@@ -49,7 +49,7 @@ def build_dm(e, v, nocc, occ_mode=0, occ_kT=torch.tensor(0.05), smearing="fermi"
 
 # TODO: abstract and modularize SCF methods (only Fock update differs)!
 
-# DIIS
+# simple DIIS
 def scf_diis(M, w, gss, gpp, gsp, gp2, hsp, nHydro, nHeavy, nOccMO,
              nmol, molsize, maskd, mask, idxi, idxj, P, eps_E,
              sp2=[False], alpha=0.0, backward=False, scf_maxiter=200,
@@ -62,6 +62,8 @@ def scf_diis(M, w, gss, gpp, gsp, gp2, hsp, nHydro, nHeavy, nOccMO,
     else:
         get_fock_mat, n_spin = fock, 1
     
+    ## DIIS needs at least two warm-up steps
+    diis_start = max(diis_start, 2)
     delta_E = torch.full((nmol,), 1e3, dtype=P.dtype, device=P.device)
     delta_P = torch.full((nmol,n_spin), 1e3, dtype=P.dtype, device=P.device)
     F = get_fock_mat(nmol, molsize, P, M, maskd, mask, idxi, idxj, w, gss,
@@ -71,11 +73,11 @@ def scf_diis(M, w, gss, gpp, gsp, gp2, hsp, nHydro, nHeavy, nOccMO,
     Eel = elec_energy(P, F, Hcore)
     Eel_old = Eel.clone()
     
-    extrapolator = DIIS(n_mol=nmol, nspin=n_spin, n=4*molsize, k_max=diis_max,
+    extrapolator = SimpleDIIS(n_mol=nmol, nspin=n_spin, n=4*molsize, k_max=diis_max,
                         compress_rank=compress_rank,
                         device=M.device, dtype=M.dtype)
     Pold = P.clone()
-    for k in range(scf_maxiter + 1):
+    for k in range(1, scf_maxiter + 1):
         e, v = sym_eig_trunc(F[notconv], nHeavy[notconv], nHydro[notconv],
                              nOccMO[notconv])
         D = build_dm(e, v, nOccMO[notconv], occ_mode=occ_mode, occ_kT=occ_kT, smearing=smearing) / n_spin
@@ -88,7 +90,7 @@ def scf_diis(M, w, gss, gpp, gsp, gp2, hsp, nHydro, nHeavy, nOccMO,
         PF = torch.einsum("...ij,...jk->...ik", P, F)
         FP_commutator = FP - PF
         extrapolator.append(F, FP_commutator)
-        if (extrapolator.hist_lens >= diis_start).any():
+        if k >= diis_start:
             F_diis = extrapolator.extrapolate()
             if detach_diis:
                 # trick to replace data in F with the data in F_diis,
@@ -144,7 +146,7 @@ def scf_constmix(M, w, gss, gpp, gsp, gp2, hsp, nHydro, nHeavy, nOccMO,
     Eel = elec_energy(P, F, Hcore)
     Eel_old = Eel.clone()
     Pold = P.clone()
-    for k in range(scf_maxiter + 1):
+    for k in range(1, scf_maxiter + 1):
         if debug: start_time = time.time()
         e, v = sym_eig_trunc(F[notconv], nHeavy[notconv], nHydro[notconv],
                              nOccMO[notconv])

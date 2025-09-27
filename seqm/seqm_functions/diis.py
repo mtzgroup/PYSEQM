@@ -44,7 +44,7 @@ class SimpleDIIS:
     def _compress_FPPF(self, FPPF, n_mol, nspin, n):
         """ compress FPPF using random projection """
         err_flat = FPPF.reshape(n_mol, nspin * n * n)
-        err_comp = torch.einsum("...ik,...jk->ij", err_flat, self.proj)
+        err_comp = torch.einsum("...ik,...kj->ij", err_flat, self.proj)
         return err_comp.reshape(n_mol, self.FPPF_rank)
         
     def _reshape_FPPF(self, FPPF, n_mol, nspin, n):

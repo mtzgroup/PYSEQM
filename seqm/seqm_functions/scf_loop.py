@@ -77,7 +77,9 @@ def scf_diis(M, w, gss, gpp, gsp, gp2, hsp, nHydro, nHeavy, nOccMO,
                         compress_rank=compress_rank,
                         device=M.device, dtype=M.dtype)
     Pold = P.clone()
+    if debug: print("Iter  delta E [eV]    delta P    unconv dt [s]")
     for k in range(1, scf_maxiter + 1):
+        if debug: start_time = time.time()
         e, v = sym_eig_trunc(F[notconv], nHeavy[notconv], nHydro[notconv],
                              nOccMO[notconv])
         D = build_dm(e, v, nOccMO[notconv], occ_mode=occ_mode, occ_kT=occ_kT, smearing=smearing) / n_spin
@@ -100,7 +102,7 @@ def scf_diis(M, w, gss, gpp, gsp, gp2, hsp, nHydro, nHeavy, nOccMO,
             else:
                 F = F_diis
         ###############
-
+        
         delta_P[notconv] = (P.abs() - Pold.abs()).norm(dim=(-2,-1))
         deltaP_mol = (delta_P > eps_P).any(dim=-1) # over spin channels
         Pold[notconv] = P[notconv]
@@ -112,8 +114,8 @@ def scf_diis(M, w, gss, gpp, gsp, gp2, hsp, nHydro, nHeavy, nOccMO,
         notconv = (delta_E > eps_E).logical_or(deltaP_mol)
         if debug:
             end_time = time.time()
-            print("scf ", k, delta_E.max().item(), delta_P.max().item(), 
-                  notconv.sum().item(), end_time - start_time )
+            print(" {:3d}  {:8.5e}   {:8.5e}  {:5d}  {:5.3f}".format(k, delta_E.max().item(),
+                    delta_P.max().item(), notconv.sum().item(), end_time - start_time) )
         if not notconv.any(): break
     
     ## if returning F, probably need to re-built Fock!!
@@ -146,6 +148,7 @@ def scf_constmix(M, w, gss, gpp, gsp, gp2, hsp, nHydro, nHeavy, nOccMO,
     Eel = elec_energy(P, F, Hcore)
     Eel_old = Eel.clone()
     Pold = P.clone()
+    if debug: print("Iter  delta E [eV]    delta P    unconv dt [s]")
     for k in range(1, scf_maxiter + 1):
         if debug: start_time = time.time()
         e, v = sym_eig_trunc(F[notconv], nHeavy[notconv], nHydro[notconv],
@@ -173,8 +176,8 @@ def scf_constmix(M, w, gss, gpp, gsp, gp2, hsp, nHydro, nHeavy, nOccMO,
         notconv = (delta_E > eps_E).logical_or(deltaP_mol)
         if debug:
             end_time = time.time()
-            print("scf ", k, delta_E.max().item(), delta_P.max().item(),
-                  notconv.sum().item(), end_time - start_time )
+            print(" {:3d}  {:8.5e}   {:8.5e}  {:5d}  {:5.3f}".format(k, delta_E.max().item(),
+                    delta_P.max().item(), notconv.sum().item(), end_time - start_time) )
         if not notconv.any(): break
     return P, notconv
 

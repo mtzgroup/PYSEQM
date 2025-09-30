@@ -17,7 +17,7 @@ import time
 #scf_backward==2: go backward scf loop directly
 
 
-debug = False
+debug = True
 RAISE_ERROR_IF_SCF_FORWARD_FAILS = False
 RAISE_ERROR_IF_SCF_BACKWARD_FAILS = False
 
@@ -54,8 +54,7 @@ def scf_diis(M, w, gss, gpp, gsp, gp2, hsp, nHydro, nHeavy, nOccMO,
              nmol, molsize, maskd, mask, idxi, idxj, P, eps_E,
              sp2=[False], alpha=0.0, backward=False, scf_maxiter=200,
              occ_mode="integer", occ_kT=torch.tensor(0.05), smearing="fermi", 
-             eps_P=1e-5, diis_start=2, diis_max=8, detach_diis=True,
-             compress_rank=None):
+             eps_P=1e-5, diis_start=2, diis_max=8, rank_compression=False):
     notconv = torch.ones(nmol, dtype=torch.bool, device=M.device)
     if P.dim() == 4:
         get_fock_mat, n_spin = fock_u_batch, 2
@@ -66,58 +65,53 @@ def scf_diis(M, w, gss, gpp, gsp, gp2, hsp, nHydro, nHeavy, nOccMO,
     diis_start = max(diis_start, 2)
     delta_E = torch.full((nmol,), 1e3, dtype=P.dtype, device=P.device)
     delta_P = torch.full((nmol,n_spin), 1e3, dtype=P.dtype, device=P.device)
-    F = get_fock_mat(nmol, molsize, P, M, maskd, mask, idxi, idxj, w, gss,
-                     gpp, gsp, gp2, hsp)
     Hcore = M.reshape(nmol, molsize, molsize, 4, 4).transpose(2,3) \
              .reshape(nmol, 4*molsize, 4*molsize)
-    Eel = elec_energy(P, F, Hcore)
+    F = get_fock_mat(nmol, molsize, P, M, maskd, mask, idxi, idxj, w, gss,
+                     gpp, gsp, gp2, hsp)
+    Eel = elec_energy(P, F, Hcore)#torch.zeros(nmol, dtype=P.dtype, device=P.device)
     Eel_old = Eel.clone()
+    Pold = P.clone()
     
     extrapolator = SimpleDIIS(n_mol=nmol, nspin=n_spin, n=4*molsize, k_max=diis_max,
-                        compress_rank=compress_rank,
+                        rank_compression=rank_compression,
                         device=M.device, dtype=M.dtype)
-    Pold = P.clone()
-    if debug: print("Iter  delta E [eV]    delta P    unconv dt [s]")
+    if debug: print("Iter  delta E [eV]    delta P      DIIS Err    unconv dt [s]")
     for k in range(1, scf_maxiter + 1):
         if debug: start_time = time.time()
-        e, v = sym_eig_trunc(F[notconv], nHeavy[notconv], nHydro[notconv],
-                             nOccMO[notconv])
+        e, v = sym_eig_trunc(F[notconv], nHeavy[notconv], nHydro[notconv], nOccMO[notconv])
         D = build_dm(e, v, nOccMO[notconv], occ_mode=occ_mode, occ_kT=occ_kT, smearing=smearing) / n_spin
         P[notconv] = unpack(D, nHeavy[notconv], nHydro[notconv], F.shape[-1])
-        ### Fock update
+
         F = get_fock_mat(nmol, molsize, P, M, maskd, mask, idxi, idxj, w, gss,
                          gpp, gsp, gp2, hsp)
         
         FP = torch.einsum("...ij,...jk->...ik", F, P) 
         PF = torch.einsum("...ij,...jk->...ik", P, F)
         FP_commutator = FP - PF
-        extrapolator.append(F, FP_commutator)
-        if k >= diis_start:
-            F_diis = extrapolator.extrapolate()
-            if detach_diis:
-                # trick to replace data in F with the data in F_diis,
-                # while keeping the grad field of F
-                dF = F - F_diis.detach()
-                F = F_diis.detach() + dF
-            else:
-                F = F_diis
-        ###############
         
+        diis_err = FP_commutator.reshape(nmol, -1).pow(2).mean(dim=-1).sqrt()
         delta_P[notconv] = (P.abs() - Pold.abs()).norm(dim=(-2,-1))
-        deltaP_mol = (delta_P > eps_P).any(dim=-1) # over spin channels
+        Pconv_mol = (delta_P > eps_P).any(dim=-1) # over spin channels
         Pold[notconv] = P[notconv]
         
         Eel[notconv] = elec_energy(P[notconv], F[notconv], Hcore[notconv])
         delta_E[notconv] = torch.abs(Eel[notconv] - Eel_old[notconv])
         Eel_old[notconv] = Eel[notconv]
-        
-        notconv = (delta_E > eps_E).logical_or(deltaP_mol)
+        notconv = (delta_E > eps_E).logical_or(diis_err > eps_P).logical_or(Pconv_mol)
         if debug:
             end_time = time.time()
-            print(" {:3d}  {:8.5e}   {:8.5e}  {:5d}  {:5.3f}".format(k, delta_E.max().item(),
-                    delta_P.max().item(), notconv.sum().item(), end_time - start_time) )
+            print(" {:3d}  {:8.5e}   {:8.5e}   {:8.5e}  {:5d}  {:5.3f}".format(k, delta_E.max().item(),
+                    delta_P.max().item(), diis_err.max(), notconv.sum().item(), end_time - start_time) )
         if not notconv.any(): break
-    
+        
+        extrapolator.append(F, FP_commutator)
+        if k >= diis_start:
+            with torch.no_grad(): F_diis = extrapolator.extrapolate()
+            ## trick to keep grad history of F, while updating to F_diis
+            dF = (F_diis - F).detach()
+            F = F + dF
+        
     ## if returning F, probably need to re-built Fock!!
     return P, notconv
     
@@ -142,9 +136,10 @@ def scf_constmix(M, w, gss, gpp, gsp, gp2, hsp, nHydro, nHeavy, nOccMO,
     
     delta_E = torch.ones(nmol, dtype=P.dtype, device=P.device)
     delta_P = torch.full((nmol,n_spin), 1e3, dtype=P.dtype, device=P.device)
-    F = get_fock_mat(nmol, molsize, P, M, maskd, mask, idxi, idxj, w, gss, gpp, gsp, gp2, hsp)
     Hcore = M.reshape(nmol, molsize, molsize, 4, 4).transpose(2,3) \
              .reshape(nmol, 4*molsize, 4*molsize)
+    F = get_fock_mat(nmol, molsize, P, M, maskd, mask, idxi, idxj, w, gss,
+                     gpp, gsp, gp2, hsp)
     Eel = elec_energy(P, F, Hcore)
     Eel_old = Eel.clone()
     Pold = P.clone()
@@ -266,14 +261,12 @@ class SCF(torch.autograd.Function):
         if scf_converger[0] == 4:
             diis_start = scf_converger[1].get('diis_start', 2)
             diis_max = scf_converger[1].get('diis_max', 8)
-            detach_diis = scf_converger[1].get('detach_diis', True)
-            compress_rank = scf_converger[1].get('compress_rank', None)
+            rank_compression = scf_converger[1].get('rank_compression', False)
             P, notconverged = scf_diis(M, w, gss, gpp, gsp, gp2, hsp, nHydro, nHeavy,
                                 nOccMO, nmol, molsize, maskd, mask, idxi, idxj, P, eps_E,
                                 scf_maxiter=scf_maxiter, occ_mode=occ_mode, occ_kT=occ_kT,
                                 smearing=smearing, eps_P=eps_P, diis_start=diis_start, 
-                                diis_max=diis_max, detach_diis=detach_diis,
-                                compress_rank=compress_rank)
+                                diis_max=diis_max, rank_compression=rank_compression)
 
         elif scf_converger[0] == 0:
             P, notconverged = scf_constmix(M, w, gss, gpp, gsp, gp2, hsp,

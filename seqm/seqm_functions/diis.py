@@ -1,8 +1,9 @@
 import torch
+from typing import Union
 
 
 class SimpleDIIS:
-    def __init__(self, n_mol, nspin, n, k_max=8, compress_rank=None,
+    def __init__(self, n_mol, nspin, n, k_max=8, rank_compression: Union[float, bool] = False,
                  device=None, dtype=None, seed=0, regularization=1e-8):
         self.k_max = k_max
         Ik = torch.eye(k_max, dtype=dtype, device=device).unsqueeze(0)
@@ -13,18 +14,26 @@ class SimpleDIIS:
         self.F_hist = torch.zeros((n_mol, k_max, nspin, n, n), dtype=dtype, device=device)
         self.in_buffer = torch.zeros((n_mol, k_max), dtype=dtype, device=device)
         self.pos, Ncomp = 0, nspin * n * n
-        if compress_rank is None:
-            self.FPPF_rank = Ncomp
-            self.prepare_FPPF = self._reshape_FPPF
-        else:
+        if rank_compression:
+            if not isinstance(rank_compression, float):
+                msg  = "Invalid input for `rank_compression`. Expected one of float or False,"
+                msg += " but got " + str(type(rank_compression))
+                raise ValueError(msg)
+            elif (rank_compression > 1.0) or (rank_compression <= 0.01):
+                msg  = "Invalid input for `rank_compression`. Expected float between 0.01 and 1 "
+                msg += "or False, but got " + str(rank_compression)
+                raise ValueError(msg)
             ## set up random projection
             torch.manual_seed(seed)
-            self.FPPF_rank = int(compress_rank)
+            self.FPPF_rank = int(rank_compression * Ncomp)
             V = torch.randn((self.FPPF_rank, Ncomp), dtype=dtype, device=device)
             Q, _ = torch.linalg.qr(V.T)
             self.proj = Q[:, :self.FPPF_rank].clone()
             self.proj.requires_grad_(False)
             self.prepare_FPPF = self._compress_FPPF
+        else:
+            self.FPPF_rank = Ncomp
+            self.prepare_FPPF = self._reshape_FPPF
         self.comm_hist = torch.zeros((n_mol, k_max, self.FPPF_rank), dtype=dtype, device=device)
 
     def append(self, F, FPPF):

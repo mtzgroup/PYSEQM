@@ -17,7 +17,7 @@ import time
 #scf_backward==2: go backward scf loop directly
 
 
-debug = True
+debug = False
 RAISE_ERROR_IF_SCF_FORWARD_FAILS = False
 RAISE_ERROR_IF_SCF_BACKWARD_FAILS = False
 
@@ -64,7 +64,7 @@ def scf_diis(M, w, gss, gpp, gsp, gp2, hsp, nHydro, nHeavy, nOccMO,
     ## DIIS needs at least two warm-up steps
     diis_start = max(diis_start, 2)
     delta_E = torch.full((nmol,), 1e3, dtype=P.dtype, device=P.device)
-    delta_P = torch.full((nmol,n_spin), 1e3, dtype=P.dtype, device=P.device)
+    delta_P = torch.full((nmol,n_spin), 1e3, dtype=P.dtype, device=P.device).squeeze(-1)
     Hcore = M.reshape(nmol, molsize, molsize, 4, 4).transpose(2,3) \
              .reshape(nmol, 4*molsize, 4*molsize)
     F = get_fock_mat(nmol, molsize, P, M, maskd, mask, idxi, idxj, w, gss,
@@ -91,7 +91,7 @@ def scf_diis(M, w, gss, gpp, gsp, gp2, hsp, nHydro, nHeavy, nOccMO,
         FP_commutator = FP - PF
         
         diis_err = FP_commutator.reshape(nmol, -1).pow(2).mean(dim=-1).sqrt()
-        delta_P[notconv] = (P.abs() - Pold.abs()).norm(dim=(-2,-1))
+        delta_P[notconv] = (P[notconv].abs() - Pold[notconv].abs()).norm(dim=(-2,-1))
         Pconv_mol = (delta_P > eps_P).any(dim=-1) # over spin channels
         Pold[notconv] = P[notconv]
         
@@ -135,7 +135,7 @@ def scf_constmix(M, w, gss, gpp, gsp, gp2, hsp, nHydro, nHeavy, nOccMO,
         get_fock_mat, n_spin = fock, 1
     
     delta_E = torch.ones(nmol, dtype=P.dtype, device=P.device)
-    delta_P = torch.full((nmol,n_spin), 1e3, dtype=P.dtype, device=P.device)
+    delta_P = torch.full((nmol,n_spin), 1e3, dtype=P.dtype, device=P.device).squeeze(-1)
     Hcore = M.reshape(nmol, molsize, molsize, 4, 4).transpose(2,3) \
              .reshape(nmol, 4*molsize, 4*molsize)
     F = get_fock_mat(nmol, molsize, P, M, maskd, mask, idxi, idxj, w, gss,
@@ -160,7 +160,7 @@ def scf_constmix(M, w, gss, gpp, gsp, gp2, hsp, nHydro, nHeavy, nOccMO,
                          gpp, gsp, gp2, hsp)
         ###############
 
-        delta_P[notconv] = (P.abs() - Pold.abs()).norm(dim=(-2,-1))
+        delta_P[notconv] = (P[notconv].abs() - Pold[notconv].abs()).norm(dim=(-2,-1))
         deltaP_mol = (delta_P > eps_P).any(dim=-1) # over spin channels
         Pold[notconv] = P[notconv]
 

@@ -311,7 +311,7 @@ class Hamiltonian(torch.nn.Module):
         super(Hamiltonian, self).__init__()
         #put eps and scf_backward_eps as torch.nn.Parameter such that it is saved with model and can
         #be used to restart jobs
-        self.eps = torch.nn.Parameter(torch.as_tensor(seqm_parameters['scf_eps']), requires_grad=False)
+        self.eps_E = torch.nn.Parameter(torch.as_tensor(seqm_parameters['scf_eps']), requires_grad=False)
         self.sp2 = seqm_parameters.get('sp2', [False])
         self.scf_converger = seqm_parameters['scf_converger']
         # whether return eigenvalues, eigenvectors, otherwise they are None
@@ -324,6 +324,13 @@ class Hamiltonian(torch.nn.Module):
         # 2: direct backprop through SCF cycle
         self.ivans_beta = seqm_parameters.get('ivans_beta', False)
         self.scf_maxiter = seqm_parameters.get('scf_maxiter', 200)
+        self.occ_mode = seqm_parameters.get('occ_mode', 0)
+        kT_in = seqm_parameters.get('occ_kT', 0.05)
+        if not torch.is_tensor(kT_in):
+            kT_in = torch.tensor(kT_in, requires_grad=False)
+        self.occ_kT = torch.nn.Parameter(kT_in)
+        self.smearing = seqm_parameters.get('smearing', 'fermi')
+        self.eps_P = seqm_parameters.get('scf_eps_P', 1e-5)
     
     def forward(self, const, molsize, nHeavy, nHydro, nocc, Z, maskd, mask, atom_molid, pair_molid, idxi, idxj, ni,nj,xij,rij, parameters, P0=None):
         """
@@ -380,7 +387,7 @@ class Hamiltonian(torch.nn.Module):
                               hsp=parameters['h_sp'],
                               beta=beta,
                               Kbeta=Kbeta,
-                              eps=self.eps,
+                              eps_E=self.eps_E,
                               P=P0,
                               sp2=self.sp2,
                               scf_converger=self.scf_converger,
@@ -388,7 +395,11 @@ class Hamiltonian(torch.nn.Module):
                               scf_backward=self.scf_backward,
                               scf_backward_eps=self.scf_backward_eps,
                               ivans_beta=self.ivans_beta,
-                              scf_maxiter=self.scf_maxiter)
+                              scf_maxiter=self.scf_maxiter,
+                              occ_mode=self.occ_mode,
+                              occ_kT=self.occ_kT,
+                              smearing=self.smearing,
+                              eps_P=self.eps_P)
         #
         return F, e, C, P, Hcore, w, charge, notconverged
     

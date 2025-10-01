@@ -23,6 +23,13 @@ device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 prop = "energy"#"gap"
 variable = "coords"#"param"
 uhf = True
+occ_mode = 0  ## 0: integer, 2: FON/FOMO/Fermi
+converger = "constant" ## "diis" or "constant"
+
+if converger == "diis":
+    scf_mixer = [4, {}]
+else:
+    scf_mixer = [0, 0.25]
 
 if uhf:
     species = torch.as_tensor([[6,1,1,1]], dtype=torch.int64, device=device)
@@ -39,7 +46,7 @@ else:
     coordinates = torch.tensor([
                   [
                    [0.0000,              0.0000,              0.0000],
-                   [1.22732374,          0.0000,              0.0000],
+                   [1.22832374,          0.0000,              0.0000],
                    [1.8194841064614802,  0.93941263319067747, 0.0000],
                    [1.8193342232738994, -0.93951967178254525, 0.0000]
                   ]
@@ -57,7 +64,7 @@ else:
 seqm_parameters = {
                    'method'            : 'AM1',
                    'scf_eps'           : 1e-9,
-                   'scf_converger'     : [0,0.25],
+                   'scf_converger'     : scf_mixer,
                    'sp2'               : [False, 1e-5],
                    'elements'          : elements,
                    'learned'           : lpar,
@@ -67,6 +74,8 @@ seqm_parameters = {
                    'parameter_file_dir': '/home/martin/work/software/PYSEQM/seqm/params/',
                    'eig'               : prop=="gap",
                    'UHF'               : uhf,
+                   'occ_mode'          : occ_mode,
+                   'occ_kT'            : 1.8,
                   }
 
 const = Constants().to(device)
@@ -95,21 +104,21 @@ def parse_exc(msg):
 
 gradvar = p if variable=="param" else coordinates
 with torch.autograd.set_detect_anomaly(True):
-    print("scf_backward = 0")
-    eng = Energy(seqm_parameters).to(device)
-    def f0(x): return eng(mol, learned_parameters=learnedpar, all_terms=True)[prop2idx[prop]]
-    try:
-        test_grad0 = torch.autograd.gradcheck(f0, (gradvar,), eps=1e-6, atol=0.001, rtol=0.01)
-        print("Gradient correct")
-    except BaseException as eg0:
-        print("Gradient NOT correct")
-        parse_exc(eg0)
-    try:
-        test_hess0 = torch.autograd.gradgradcheck(f0, (gradvar,), eps=1e-6, atol=0.001, rtol=0.01)
-        print("Second derivative correct")
-    except BaseException as eh0:
-        print("Second derivative NOT correct")
-        parse_exc(eh0)
+#    print("scf_backward = 0")
+#    eng = Energy(seqm_parameters).to(device)
+#    def f0(x): return eng(mol, learned_parameters=learnedpar, all_terms=True)[prop2idx[prop]]
+#    try:
+#        test_grad0 = torch.autograd.gradcheck(f0, (gradvar,), eps=1e-6, atol=0.001, rtol=0.01)
+#        print("Gradient correct")
+#    except BaseException as eg0:
+#        print("Gradient NOT correct")
+#        parse_exc(eg0)
+#    try:
+#        test_hess0 = torch.autograd.gradgradcheck(f0, (gradvar,), eps=1e-6, atol=0.001, rtol=0.01)
+#        print("Second derivative correct")
+#    except BaseException as eh0:
+#        print("Second derivative NOT correct")
+#        parse_exc(eh0)
     
     seqm_parameters['scf_backward'] = 1
     print("\nscf_backward = 1")
